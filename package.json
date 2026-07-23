@@ -1,14 +1,22 @@
 {
   "name": "@elicify-ai/elicify-vertex",
   "version": "0.8.0",
-  "description": "Opencode plugin that injects harness directives into the LLM input via the official chat.transform hooks — verification, evidence, and communication discipline as procedure, not luck.",
+  "description": "Opencode plugin that injects harness directives into the LLM input via the official chat.transform hooks \u2014 verification, evidence, and communication discipline as procedure, not luck.",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/plugin.cjs",
+  "module": "./dist/plugin.js",
+  "types": "./dist/plugin.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/plugin.d.ts",
+      "import": "./dist/plugin.js",
+      "require": "./dist/plugin.cjs",
+      "default": "./dist/plugin.cjs"
+    },
+    "./lib": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -21,7 +29,7 @@
     "scripts"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && cp scripts/plugin.cjs dist/plugin.cjs",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json",
     "test": "vitest run",

@@ -1478,3 +1478,4 @@ verify before claiming done, control things manually, communicate calmly.`,
 }
 
 export default ElicifyVertexPlugin
+export const server = ElicifyVertexPlugin
