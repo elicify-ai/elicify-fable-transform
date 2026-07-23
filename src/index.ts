@@ -264,10 +264,10 @@ export class EvidenceLedger {
 // FILE-KIND CLASSIFIER — used for docs-only exemption in the stop gate
 // ===========================================================================
 // Mirrors fablize ledger.classify_path_kind. We classify into 4 kinds:
-//   - docs    : .md, .txt, README, comments-only changes
-//   - code    : .ts, .js, .py, .go, .rs, .java, .c, .cpp, .h, etc.
-//   - config  : .json, .yaml, .yml, .toml, .ini, .env, package.json
-//   - other   : anything else
+//   - docs    : .md/.mdx/.txt/.rst/.adoc, README/LICENSE basenames, config under docs/
+//   - code    : source extensions (wins over a docs/ path segment)
+//   - config  : .json/.yaml/.yml/.toml/.ini/.env
+//   - other   : anything else (no separate assets kind)
 // ----------------------------------------------------------------------------
 
 const DOC_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst", ".adoc"])
@@ -733,7 +733,7 @@ const PYTHON_VERIFIER_RE = /^(?:python(?:3(?:\.\d+)?)?|py)\s+-m\s+(?:pytest|unit
 const LANGUAGE_VERIFIER_RE = /^(?:go\s+test|cargo\s+(?:test|check|build)|mvnw?\s+test|gradlew?\s+test)(?:\s|$)/i
 const PACKAGE_VERIFIER_RE = /^(?:npm|pnpm|yarn|bun)\s+(?:test|lint|typecheck|build|check|validate|verify)(?:\s|$)/i
 const VERIFIER_SCRIPT_PARTS = new Set(["test", "tests", "lint", "typecheck", "build", "check", "validate", "verify", "verifier"])
-const EXEC_WRAPPER_RE = /^(?:npx|bunx|pnpm\s+(?:exec|dlx)|yarn\s+dlx)\s+((?:pytest|vitest|jest|tsc|eslint|ruff|mypy|playwright|cypress|rspec)(?:\s|$).*)/i
+const EXEC_WRAPPER_HEAD_RE = /^(?:npx|bunx|pnpm\s+(?:exec|dlx)|yarn\s+dlx)\s+/i
 const MAKE_VERIFIER_RE = /^(?:make|just|task)\s+(?:test|lint|typecheck|build|check|validate|verify)(?:\s|$)/i
 
 const FAILURE_PATTERN_RE = /command not found|no such file or directory|(?:^|\n)\s*(?:traceback(?:\s+\(most recent call last\))?|syntaxerror\b|panic:|segmentation fault|segfault\b|aborted\b|killed by\b|signal [1-9]\d*)|\berror\s+TS\d+|^\s*error:|npm ERR!|ELIFECYCLE|\b[1-9]\d*\s+(?:tests?\s+)?failed\b|\b[1-9]\d*\s+errors?\b|\btests? failed\b|\b(?:build|lint|validation) failed\b|\bFAIL(?:ED)?\s+(?:tests?\/|[^\s]+\.(?:test|spec)\.)|\bFAILED\s*(?:\(|$)|\bfailures?\s*=\s*[1-9]\d*|exit(?:ed)? (?:with )?(?:code|status) -?[1-9]\d*/im
@@ -765,10 +765,28 @@ function unwrapShellCommand(segment: string): string {
   return wrapped ? wrapped[2].trim() : value
 }
 
+/** Peel npx/bunx/pnpm dlx wrappers including common flags and pkg@version. */
+function afterExecWrapper(value: string): string | null {
+  if (!EXEC_WRAPPER_HEAD_RE.test(value)) return null
+  let rest = value.replace(EXEC_WRAPPER_HEAD_RE, "").trim()
+  // Strip leading flags: -y, --yes, --no-install, --bun, --package=x, short clusters
+  for (;;) {
+    const next = rest.replace(
+      /^(?:-[a-zA-Z]+|--(?:yes|no-install|bun|package(?:=\S+)?|[\w-]+(?:=\S+)?))\s+/i,
+      "",
+    ).trim()
+    if (next === rest) break
+    rest = next
+  }
+  // vitest@latest / @scope/pkg@1.2.3 → bare package name for verifier match
+  rest = rest.replace(/^(@?[\w/.-]+?)(?:@[\w.^~>=<-]+)(?=\s|$)/, "$1")
+  return rest
+}
+
 function matchVerificationSegment(segment: string): string | null {
   const value = unwrapShellCommand(segment)
-  const wrapper = value.match(EXEC_WRAPPER_RE)
-  const candidate = wrapper ? wrapper[1] : value
+  const unwrapped = afterExecWrapper(value)
+  const candidate = unwrapped ?? value
   const packageRun = candidate.match(/^(?:npm|pnpm|yarn|bun)\s+run\s+([^\s;&|]+)/i)
   if (packageRun && packageRun[1].toLowerCase().split(/[-_:]/).some((part) => VERIFIER_SCRIPT_PARTS.has(part))) {
     return packageRun[0]

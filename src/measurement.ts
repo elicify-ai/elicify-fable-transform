@@ -61,7 +61,7 @@ export type EventType =
 /** Payload schema is intentionally loose — measurement is observational. */
 export type EventPayload = Record<string, unknown>
 
-/** A single event as written to events.jsonl. */
+/** A single event as written to .vertex-events.jsonl (see eventsPath()). */
 export interface MeasurementEvent {
   ts: string
   session_id: string
@@ -133,8 +133,8 @@ export function makeEvent(
 }
 
 /**
- * Append one event to events.jsonl (append-only, never rewrites). Failures
- * are swallowed: measurement must never crash the plugin.
+ * Append one event to the events JSONL (append-only, never rewrites). Failures
+ * are fail-open for the plugin hot path but logged to stderr for operators.
  * Mirrors shadow_logger.py:63-69.
  */
 export function appendEvent(event: MeasurementEvent, path?: string): string {

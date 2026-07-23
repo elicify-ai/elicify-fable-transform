@@ -47,6 +47,12 @@ describe("parseVerification — positive command allowlist", () => {
     expect(parseVerification("bash -lc 'cd app && npm run test'", "12 passed", 0).outcome).toBe("verified")
     expect(parseVerification("cd app && npm run typecheck && npm test", "8 passed", 0).outcome).toBe("verified")
     expect(parseVerification("npx vitest run", "8 passed", 0).outcome).toBe("verified")
+    expect(parseVerification("npx -y tsc --noEmit", "", 0).outcome).toBe("verified")
+    expect(parseVerification("npx --yes vitest run", "8 passed", 0).outcome).toBe("verified")
+    expect(parseVerification("npx --no-install eslint src", "", 0).outcome).toBe("verified")
+    expect(parseVerification("bunx --bun vitest run", "3 passed", 0).outcome).toBe("verified")
+    expect(parseVerification("pnpm dlx vitest@latest run", "3 passed", 0).outcome).toBe("verified")
+    expect(parseVerification("bash -lc 'npx --yes vitest run'", "3 passed", 0).outcome).toBe("verified")
   })
 
   it("does not treat verifier names in text-only commands as execution", () => {

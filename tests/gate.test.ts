@@ -104,10 +104,9 @@ describe("EvidenceLedger", () => {
     expect(l.summary("s1")).toBe("files changed: yes · verified: 2 · failed: 1")
   })
 
-  it("does not block on docs-only changes (mode is captured separately; gate is evidence-based)", () => {
-    // Per fablize parity: mode-aware stop policy will check mode separately.
-    // This test pins the current EvidenceLedger contract: shouldBlockStop is
-    // evidence-based only; the mode gate is additive.
+  it("does not block when verification succeeded under default normal mode", () => {
+    // Mode is part of shouldBlockStop (normal never hard-blocks). This pins
+    // the verified path; deep mode + docs-only are covered in stopMode.test.ts.
     const l = new EvidenceLedger()
     l.reset("s1")
     l.recordVerification("s1", "true", 0, true)
