@@ -1,6 +1,6 @@
 {
   "name": "@elicify-ai/elicify-vertex",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Opencode plugin that injects harness directives into the LLM input via the official chat.transform hooks — verification, evidence, and communication discipline as procedure, not luck.",
   "type": "module",
   "main": "./dist/index.js",
@@ -27,6 +27,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "setup": "bash scripts/install-skill.sh",
+    "uninstall": "bash scripts/uninstall.sh",
     "postinstall": "bash scripts/install-skill.sh || true"
   },
   "keywords": [
