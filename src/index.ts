@@ -563,12 +563,134 @@ const VERTEX_CONTRACT = `[vertex:contract] Verification reminder: before reporti
 - observe the actual output of the change (run the test, render the artifact, hit the endpoint);
 - ground any "done" claim in a tool result from this turn, not in intent;
 - if a step failed and you cannot fix it, surface that explicitly.
-What counts as verification: a Bash tool call (not echo/true/cat) that exited 0 with non-empty stdout. A Write/Edit success message is authoring, not verifying.
+What counts as verification: an allowlisted test, lint, typecheck, build, check, validate, verify, or HTTP probe command whose observed exit code is reliable and zero, with no contradictory failure output. Silent successful tools such as tsc count. A Write/Edit success message is authoring, not verifying.
 A passing test is not evidence until you have confirmed the test can fail.
 Automated tests often do not surface real issues. Before claiming something works, control it yourself — run it manually, observe the actual behavior, and if browser tools are available, use them to see the rendered output.
 Communicate in a calm, factual tone. Lead with the outcome. Avoid enthusiasm, apology, or performative framing.`
 
-const NON_VERIFICATION_RE = /^(echo|true|:|printf|cat|ls|pwd|cd|head|tail|wc|grep|rg|find|fd)\b/
+// ===========================================================================
+// PRECISE VERIFICATION PARSING — strictly better than fablize parse_tool_result.py
+// ===========================================================================
+// Fablize searches for a verifier name anywhere in the command, so text-only
+// commands such as `echo pytest` can be misclassified (parse_tool_result.py:16-23,
+// 88-89). This parser uses a positive allowlist at executable positions, checks
+// contradictory failure output even when exit=0, and rejects masked exit codes.
+// ----------------------------------------------------------------------------
+
+const DIRECT_VERIFIER_RE = /^(?:pytest|unittest|vitest|jest|tsc|eslint|ruff|mypy|playwright|cypress|rspec|curl|build|check|validate|verify)(?:\s|$)/i
+const PYTHON_VERIFIER_RE = /^(?:python(?:3(?:\.\d+)?)?|py)\s+-m\s+(?:pytest|unittest|json\.tool|py_compile)(?:\s|$)/i
+const LANGUAGE_VERIFIER_RE = /^(?:go\s+test|cargo\s+(?:test|check|build)|mvnw?\s+test|gradlew?\s+test)(?:\s|$)/i
+const PACKAGE_VERIFIER_RE = /^(?:npm|pnpm|yarn|bun)\s+(?:test|run\s+[^\s;&|]+|lint|typecheck|build|check|validate|verify)(?:\s|$)/i
+const EXEC_WRAPPER_RE = /^(?:npx|bunx|pnpm\s+(?:exec|dlx)|yarn\s+dlx)\s+((?:pytest|vitest|jest|tsc|eslint|ruff|mypy|playwright|cypress|rspec)(?:\s|$).*)/i
+const MAKE_VERIFIER_RE = /^(?:make|just|task)\s+(?:test|lint|typecheck|build|check|validate|verify)(?:\s|$)/i
+
+const FAILURE_PATTERN_RE = /command not found|no such file or directory|traceback|syntaxerror|\berror\s+TS\d+|\berror:|npm ERR!|ELIFECYCLE|\b[1-9]\d*\s+(?:tests?\s+)?failed\b|\b[1-9]\d*\s+errors?\b|\btests? failed\b|\b(?:build|lint|validation) failed\b|\bFAIL(?:ED)?\s+(?:tests?\/|[^\s]+\.(?:test|spec)\.)|exit(?:ed)? (?:with )?(?:code|status) -?[1-9]\d*|segfault|panic:|aborted|killed by|signal [1-9]\d*/i
+const SUCCESS_PATTERN_RE = /\b(?:[1-9]\d*\s+passed|0 failed|0 errors|success|succeeded|build completed|validation passed|tests? passed)\b|^ok\s/im
+
+export type VerificationOutcome = "verified" | "failed" | "ambiguous" | "not-verification"
+
+export interface VerificationResult {
+  outcome: VerificationOutcome
+  isVerificationCommand: boolean
+  matchedPattern: string | null
+  failureDetected: boolean
+  successDetected: boolean
+  /** False when shell composition can hide the verifier's real exit code. */
+  exitCodeReliable: boolean
+}
+
+function stripCommandPrefix(segment: string): string {
+  let value = segment.trim()
+  value = value.replace(/^(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)+/, "")
+  value = value.replace(/^(?:sudo(?:\s+-\S+)*|command|time)\s+/, "")
+  value = value.replace(/^\.\/(mvnw|gradlew)(?=\s|$)/, "$1")
+  return value
+}
+
+function unwrapShellCommand(segment: string): string {
+  const value = stripCommandPrefix(segment)
+  const wrapped = value.match(/^(?:bash|sh|zsh)\s+-(?:lc|c)\s+(["'])([\s\S]*)\1$/i)
+  return wrapped ? wrapped[2].trim() : value
+}
+
+function matchVerificationSegment(segment: string): string | null {
+  const value = unwrapShellCommand(segment)
+  const wrapper = value.match(EXEC_WRAPPER_RE)
+  const candidate = wrapper ? wrapper[1] : value
+  const match = candidate.match(DIRECT_VERIFIER_RE)
+    ?? candidate.match(PYTHON_VERIFIER_RE)
+    ?? candidate.match(LANGUAGE_VERIFIER_RE)
+    ?? candidate.match(PACKAGE_VERIFIER_RE)
+    ?? candidate.match(MAKE_VERIFIER_RE)
+  if (match) return match[0].trim()
+
+  const executable = candidate.match(/^\S+/)?.[0]
+  const basename = executable?.split("/").pop()
+  if (executable && basename && /(?:^|[-_.])(?:tests?|lint|typecheck|build|check|validate|verify)(?:[-_.]|$)/i.test(basename)) {
+    return executable
+  }
+  return null
+}
+
+function commandSegments(command: string): string[] {
+  return command
+    .split(/&&|\|\||[;\n]|(?<!\|)\|(?!\|)/)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+}
+
+function unwrapTopLevelShellCommand(command: string): string {
+  const value = stripCommandPrefix(command)
+  const wrapped = value.match(/^(?:bash|sh|zsh)\s+-(?:lc|c)\s+(["'])([\s\S]*)\1$/i)
+  return wrapped ? wrapped[2] : command
+}
+
+function hasReliableAggregateExit(command: string, segments: string[], verifierIndexes: number[]): boolean {
+  if (/\|\||(?<!\|)\|(?!\|)/.test(command)) return false
+  if (verifierIndexes.length === 0) return false
+  const lastVerifier = verifierIndexes[verifierIndexes.length - 1]
+  if (lastVerifier === segments.length - 1) return true
+  // `verifier && follow-up` is reliable: the follow-up cannot run after a
+  // verifier failure. Semicolon/newline composition can mask that failure.
+  const normalized = command.replace(/\s+/g, " ")
+  return normalized.includes("&&") && !/[;\n]/.test(command)
+}
+
+/** Parse one observed shell result into evidence. Exit zero is sufficient for
+ * silent tools such as `tsc --noEmit`, unless output contradicts it. */
+export function parseVerification(command: string, output: string, exitCode?: number): VerificationResult {
+  const parsedCommand = unwrapTopLevelShellCommand(command || "")
+  const segments = commandSegments(parsedCommand)
+  const matches = segments.map(matchVerificationSegment)
+  const verifierIndexes = matches
+    .map((match, index) => match ? index : -1)
+    .filter((index) => index >= 0)
+  const matchedPattern = matches.find((match): match is string => match !== null) ?? null
+  const isVerificationCommand = matchedPattern !== null
+  const failureDetected = FAILURE_PATTERN_RE.test(output || "")
+  const successDetected = SUCCESS_PATTERN_RE.test(output || "")
+  let exitCodeReliable = hasReliableAggregateExit(parsedCommand, segments, verifierIndexes)
+  if (matchedPattern?.toLowerCase().startsWith("curl")) {
+    const failsOnHttpError = /(?:^|\s)--fail(?:-with-body)?(?:\s|$)|(?:^|\s)-[A-Za-z]*f[A-Za-z]*(?:\s|$)/.test(parsedCommand)
+    const explicitHttpSuccess = /^(?:2\d\d)\s*$/.test((output || "").trim())
+      || /\bHTTP\/\d(?:\.\d)?\s+2\d\d\b/i.test(output || "")
+    exitCodeReliable = exitCodeReliable && (failsOnHttpError || explicitHttpSuccess)
+  }
+
+  if (!isVerificationCommand) {
+    return { outcome: "not-verification", isVerificationCommand, matchedPattern, failureDetected, successDetected, exitCodeReliable }
+  }
+  if (exitCode !== undefined && exitCode !== 0) {
+    return { outcome: "failed", isVerificationCommand, matchedPattern, failureDetected: true, successDetected, exitCodeReliable }
+  }
+  if (failureDetected) {
+    return { outcome: "failed", isVerificationCommand, matchedPattern, failureDetected, successDetected, exitCodeReliable }
+  }
+  if (exitCode === 0 && exitCodeReliable) {
+    return { outcome: "verified", isVerificationCommand, matchedPattern, failureDetected, successDetected, exitCodeReliable }
+  }
+  return { outcome: "ambiguous", isVerificationCommand, matchedPattern, failureDetected, successDetected, exitCodeReliable }
+}
 
 function defaultDirectives(): readonly Directive[] {
   return [{ id: "vertex:contract", text: VERTEX_CONTRACT }]
@@ -716,15 +838,22 @@ verify before claiming done, control things manually, communicate calmly.`,
           debug(`tool.after: ${tool} on ${fp || "?"} → file changed recorded for ${sid}`)
         }
 
-        // ── Bash: record verification or failure ─────────────────────────
+        // ── Bash: record verification or failure (strictly better than fablize) ──
         if (tool === "bash") {
           const command = typeof args.command === "string" ? args.command : ""
-          const isNonVerification = NON_VERIFICATION_RE.test(command.trim())
+          // parseVerification uses the POSITIVE allowlist (not just the negative
+          // denylist) and checks failure/success patterns in the output text.
+          // Mirrors fablize parse_tool_result.py:14-30 with extensions.
+          const result = parseVerification(command, out, exitCode)
 
-          if (!isNonVerification && exitCode !== undefined) {
-            const success = exitCode === 0 && out.trim().length > 0
-            ledger.recordVerification(sid, command, exitCode, success)
-            debug(`tool.after: bash "${command.slice(0, 60)}" → exit=${exitCode}, verified=${success}`)
+          if (result.isVerificationCommand) {
+            // Count only a reliable exit 0 with no contradictory failure
+            // output. Silent verifiers such as tsc are valid evidence.
+            const success = result.outcome === "verified"
+            if (exitCode !== undefined) {
+              ledger.recordVerification(sid, command, exitCode, success)
+            }
+            debug(`tool.after: bash "${command.slice(0, 60)}" → outcome=${result.outcome}, verified=${success}, pattern=${result.matchedPattern}`)
           }
 
           // Failure detection
@@ -965,7 +1094,7 @@ verify before claiming done, control things manually, communicate calmly.`,
         }
 
         const count = ledger.incrementStopBlocks(sid)
-        const reason = `[vertex:stop-block] You appear to be stopping, but files were changed this turn without an observed verification command (a Bash call that exited 0 with output). Run a verification command now and cite its output, or explicitly state what remains unverified. (Block ${count}/${opts.maxStopBlocks})`
+        const reason = `[vertex:stop-block] You appear to be stopping, but files were changed this turn without an observed successful allowlisted verification command. Run the narrowest relevant test, lint, typecheck, build, check, validate, verify, or HTTP probe now and cite its result, or explicitly state what remains unverified. (Block ${count}/${opts.maxStopBlocks})`
 
         queue.enqueue(sid, { id: "vertex:stop-block", text: reason })
         logGateFire(sid, {
