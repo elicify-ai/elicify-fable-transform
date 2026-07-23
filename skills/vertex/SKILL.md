@@ -112,6 +112,13 @@ interface ElicifyVertexOptions {
 
 Env (optional): `VERTEX_DEBUG=1` (debug log under `~/.config/opencode/.vertex-debug.log`), `VERTEX_DATA` (measurement events dir; default `~/.config/opencode`, file `.vertex-events.jsonl`).
 
+
+## Multi-story goals (optional)
+
+Tools: `elicify_vertex_goal_create` / `_next` / `_checkpoint` / `_status` (slash: `/elicify-vertex-goal-*`).
+State: `<writable-project>/.elicify-vertex/`. Not required for harness stop/promise gates.
+Requires a writable project directory (never `/`). Final story needs a session verification receipt.
+
 ## Verify
 
 ```bash

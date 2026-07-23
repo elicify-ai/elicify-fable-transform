@@ -1,21 +1,95 @@
 import { randomUUID } from "node:crypto"
 import {
+  accessSync,
   appendFileSync,
   chmodSync,
   closeSync,
+  constants,
   copyFileSync,
   existsSync,
   mkdirSync,
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs"
+import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 
 import { redactForDisk, redactSecrets } from "./redaction.js"
+
+/** True when path is filesystem root (`/` or `C:\`) — never a project worktree. */
+export function isFilesystemRoot(path: string): boolean {
+  const resolved = resolve(path)
+  const parent = dirname(resolved)
+  return parent === resolved
+}
+
+/** True when we can create `.elicify-vertex` under this directory. */
+export function isWritableGoalRoot(path: string): boolean {
+  if (!path || isFilesystemRoot(path)) return false
+  try {
+    if (!existsSync(path)) return false
+    const st = statSync(path)
+    if (!st.isDirectory()) return false
+    accessSync(path, constants.W_OK)
+    // Prove create+delete of the state dir name without leaving debris when possible.
+    const probe = join(path, `.elicify-vertex-write-probe-${process.pid}`)
+    mkdirSync(probe, { recursive: true })
+    rmProbe(probe)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function rmProbe(path: string): void {
+  try {
+    rmSync(path, { recursive: true, force: true })
+  } catch {
+    /* best-effort cleanup of write probe */
+  }
+}
+
+/**
+ * Pick a writable project root for multi-story goal state (`.elicify-vertex/`).
+ * Never uses filesystem root. Prefers explicit worktree/directory, then cwd,
+ * then `$HOME`. Throws a clear error if nothing is usable.
+ */
+export function resolveGoalWorkspaceRoot(candidates: readonly (string | undefined | null)[]): string {
+  const seen = new Set<string>()
+  const ordered: string[] = []
+  for (const raw of candidates) {
+    if (!raw || typeof raw !== "string") continue
+    const trimmed = raw.trim()
+    if (!trimmed) continue
+    const resolved = resolve(trimmed)
+    if (seen.has(resolved)) continue
+    seen.add(resolved)
+    ordered.push(resolved)
+  }
+  // Always consider process cwd and home as last-resort project anchors.
+  for (const fallback of [process.cwd(), homedir()]) {
+    const resolved = resolve(fallback)
+    if (!seen.has(resolved)) {
+      seen.add(resolved)
+      ordered.push(resolved)
+    }
+  }
+
+  for (const candidate of ordered) {
+    if (isWritableGoalRoot(candidate)) return candidate
+  }
+
+  throw new Error(
+    "elicify-vertex goals need a writable project directory (not filesystem root). " +
+      "Open or cd into a project folder you can write to, then retry. " +
+      `Tried: ${ordered.slice(0, 6).join(", ") || "(none)"}`,
+  )
+}
 
 export type StoryStatus = "pending" | "in_progress" | "complete" | "failed" | "blocked"
 export type PlanStatus = "active" | "complete" | "failed" | "blocked"
@@ -116,7 +190,14 @@ export class MultiStoryGoalEngine {
   private readonly now: () => string
 
   constructor(root: string, now: () => string = () => new Date().toISOString()) {
-    this.root = resolve(root)
+    const resolved = resolve(root)
+    if (!isWritableGoalRoot(resolved)) {
+      throw new Error(
+        "elicify-vertex goals need a writable project directory (not filesystem root). " +
+          `Refused root: ${resolved}`,
+      )
+    }
+    this.root = resolved
     this.stateDirectory = join(this.root, ".elicify-vertex")
     this.statePath = join(this.stateDirectory, "goals.json")
     this.ledgerPath = join(this.stateDirectory, "goals.ledger.jsonl")

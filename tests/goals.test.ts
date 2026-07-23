@@ -16,6 +16,9 @@ import { ElicifyVertexPlugin } from "../src/index.js"
 import {
   MultiStoryGoalEngine,
   VerificationReceiptStore,
+  isFilesystemRoot,
+  isWritableGoalRoot,
+  resolveGoalWorkspaceRoot,
   type VerificationReceipt,
 } from "../src/goals.js"
 
@@ -37,6 +40,26 @@ function tickingClock(): () => string {
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+describe("resolveGoalWorkspaceRoot", () => {
+  it("rejects filesystem root and unwritable anchors", () => {
+    expect(isFilesystemRoot("/")).toBe(true)
+    expect(isWritableGoalRoot("/")).toBe(false)
+    // Prefer an explicit writable temp root over cwd/home noise.
+    const root = temporaryRoot()
+    expect(resolveGoalWorkspaceRoot(["/", root])).toBe(root)
+    expect(resolveGoalWorkspaceRoot([root, "/"])).toBe(root)
+  })
+
+  it("falls back to a later writable candidate when earlier ones are root", () => {
+    const root = temporaryRoot()
+    expect(resolveGoalWorkspaceRoot([undefined, "", "/", root])).toBe(root)
+  })
+
+  it("MultiStoryGoalEngine refuses to bind state under filesystem root", () => {
+    expect(() => new MultiStoryGoalEngine("/")).toThrow(/writable project directory/i)
+  })
 })
 
 describe("MultiStoryGoalEngine", () => {

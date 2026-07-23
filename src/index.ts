@@ -19,6 +19,7 @@ import { tool, type Hooks, type PluginInput, type PluginOptions } from "@opencod
 import {
   MultiStoryGoalEngine,
   VerificationReceiptStore,
+  resolveGoalWorkspaceRoot,
   type GoalStoryInput,
 } from "./goals.js"
 import {
@@ -928,11 +929,24 @@ export const ElicifyVertexPlugin = async (
   const gate = new SessionGate()
   const ledger = new EvidenceLedger()
   const verificationReceipts = new VerificationReceiptStore()
-  const defaultRoot = input.worktree || input.directory || process.cwd()
+  const defaultRoot = (() => {
+    try {
+      return resolveGoalWorkspaceRoot([input.worktree, input.directory, process.cwd()])
+    } catch {
+      // Plugin still loads; goal tools throw a clear error on use if no root.
+      return process.cwd()
+    }
+  })()
   const goalRootsBySession = new Map<string, string>()
 
   const goalEngine = (context: { sessionID: string; directory: string; worktree: string }) => {
-    const root = context.worktree || context.directory || defaultRoot
+    const root = resolveGoalWorkspaceRoot([
+      context.worktree,
+      context.directory,
+      goalRootsBySession.get(context.sessionID),
+      defaultRoot,
+      process.cwd(),
+    ])
     goalRootsBySession.set(context.sessionID, root)
     return new MultiStoryGoalEngine(root)
   }
@@ -1017,7 +1031,11 @@ export const ElicifyVertexPlugin = async (
     // ── TOOLS: persistent multi-story goal engine ─────────────────────────
     tool: {
       elicify_vertex_goal_create: tool({
-        description: "Create a sequential multi-story goal plan with an automatically appended final verification gate.",
+        description:
+          "Create a sequential multi-story elicify-vertex goal plan under <project>/.elicify-vertex/. " +
+          "Requires a writable project directory (not filesystem root). " +
+          "A final verification story is appended automatically. " +
+          "Pass brief + stories[{title,objective}]; use replace=true to archive an existing plan.",
         args: {
           brief: tool.schema.string().min(1),
           stories: tool.schema.array(tool.schema.object({
@@ -1027,19 +1045,26 @@ export const ElicifyVertexPlugin = async (
           replace: tool.schema.boolean().optional().default(false),
         },
         async execute(args, context) {
-          const plan = goalEngine(context).create(args.brief, args.stories as GoalStoryInput[], args.replace)
-          return JSON.stringify(plan, null, 2)
+          const engine = goalEngine(context)
+          const plan = engine.create(args.brief, args.stories as GoalStoryInput[], args.replace)
+          return JSON.stringify({ ...plan, workspaceRoot: engine.root }, null, 2)
         },
       }),
       elicify_vertex_goal_next: tool({
-        description: "Return the active story or start the next pending story in the persisted goal plan.",
+        description:
+          "Start or return the active story in the elicify-vertex multi-story plan " +
+          "(state in <project>/.elicify-vertex/goals.json). Work only that story until checkpointed.",
         args: {},
         async execute(_args, context) {
-          return JSON.stringify(goalEngine(context).next(), null, 2)
+          const engine = goalEngine(context)
+          return JSON.stringify({ ...engine.next(), workspaceRoot: engine.root }, null, 2)
         },
       }),
       elicify_vertex_goal_checkpoint: tool({
-        description: "Checkpoint the active story. Final completion requires an observed verification receipt from this session.",
+        description:
+          "Checkpoint the active elicify-vertex story (complete|failed|blocked) with evidence. " +
+          "The final verification story requires verificationReceiptId from a successful " +
+          "allowlisted verifier observed earlier in this session (see [vertex:verification-receipt]).",
         args: {
           id: tool.schema.string().min(1),
           status: tool.schema.enum(["complete", "failed", "blocked"]),
@@ -1053,15 +1078,20 @@ export const ElicifyVertexPlugin = async (
           if (args.verificationReceiptId && !receipt) {
             throw new Error("verification receipt was not observed in this session")
           }
-          const plan = goalEngine(context).checkpoint(args.id, args.status, args.evidence, receipt)
-          return JSON.stringify(plan, null, 2)
+          const engine = goalEngine(context)
+          const plan = engine.checkpoint(args.id, args.status, args.evidence, receipt)
+          return JSON.stringify({ ...plan, workspaceRoot: engine.root }, null, 2)
         },
       }),
       elicify_vertex_goal_status: tool({
-        description: "Read and validate the persisted multi-story goal plan for the current worktree.",
+        description:
+          "Read the elicify-vertex multi-story goal plan for the current project " +
+          "(null if none). State lives at <project>/.elicify-vertex/goals.json.",
         args: {},
         async execute(_args, context) {
-          return JSON.stringify(goalEngine(context).status(), null, 2)
+          const engine = goalEngine(context)
+          const plan = engine.status()
+          return JSON.stringify(plan ? { ...plan, workspaceRoot: engine.root } : null, null, 2)
         },
       }),
     },
@@ -1092,20 +1122,44 @@ verify before claiming done, control things manually, communicate calmly.`,
       }
       const goalCommands: Record<string, { description: string; template: string }> = {
         "elicify-vertex-goal-create": {
-          description: "Create a persisted multi-story goal plan.",
-          template: "Use elicify_vertex_goal_create to create a sequential plan from these arguments. Do not omit the final verification gate; it is appended automatically. Arguments: $ARGUMENTS",
+          description: "Create an elicify-vertex multi-story plan (project/.elicify-vertex).",
+          template: `Create an elicify-vertex multi-story goal plan with the tool elicify_vertex_goal_create.
+
+Requirements:
+- Work in a writable project directory (not filesystem root). If the session is not in a project, create or cd into one first.
+- Call elicify_vertex_goal_create with JSON args:
+  - brief: one-paragraph outcome
+  - stories: array of { title, objective } (at least one work story)
+  - replace: optional boolean (archive existing plan)
+- A final verification story is appended automatically — do not invent one by hand.
+- If $ARGUMENTS is empty or incomplete, ask the user for brief + stories before calling the tool.
+- After create, call elicify_vertex_goal_next and work only the active story.
+
+User arguments (may be empty):
+$ARGUMENTS`,
         },
         "elicify-vertex-goal-next": {
-          description: "Start or resume the next story in the persisted goal plan.",
-          template: "Call elicify_vertex_goal_next, report the active story, and work only that story until it is checkpointed.",
+          description: "Start or resume the next elicify-vertex story.",
+          template: `Call elicify_vertex_goal_next, report the active story (id, title, objective), and work only that story until you checkpoint it. If there is no plan, tell the user to run /elicify-vertex-goal-create first.
+
+$ARGUMENTS`,
         },
         "elicify-vertex-goal-checkpoint": {
-          description: "Checkpoint the active story with evidence.",
-          template: "Call elicify_vertex_goal_checkpoint using these arguments. A final complete checkpoint must use the receipt ID from an observed successful verification command. Arguments: $ARGUMENTS",
+          description: "Checkpoint the active elicify-vertex story with evidence.",
+          template: `Call elicify_vertex_goal_checkpoint for the active story.
+- status: complete | failed | blocked
+- evidence: what was done / observed
+- For the final verification story only: pass verificationReceiptId from a successful allowlisted verifier in this session ([vertex:verification-receipt] id).
+If args are missing, infer id from elicify_vertex_goal_status / next; otherwise ask.
+
+User arguments:
+$ARGUMENTS`,
         },
         "elicify-vertex-goal-status": {
-          description: "Show the validated persisted multi-story goal plan.",
-          template: "Call elicify_vertex_goal_status and report the current plan, active story, and next legal transition.",
+          description: "Show the elicify-vertex multi-story plan status.",
+          template: `Call elicify_vertex_goal_status and report: workspaceRoot, plan status, active story, and next legal step (next / checkpoint / create). If null, no plan exists yet.
+
+$ARGUMENTS`,
         },
       }
       for (const [name, command] of Object.entries(goalCommands)) {

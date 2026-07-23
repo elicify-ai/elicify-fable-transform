@@ -101,14 +101,22 @@ Successful verifications also mint an in-memory **verification receipt** (`vrf_�
 
 ## Goals tools
 
+Optional multi-story plan with a final verification gate. **Not required** for normal harness use (stop/promise gates work without a plan).
+
 Exposed as OpenCode tools (and matching slash commands under `config`):
 
 | Tool | Role |
 |------|------|
-| `elicify_vertex_goal_create` | Create sequential multi-story plan under `<worktree>/.elicify-vertex/goals.json`; appends a final **verification** story automatically. `replace` archives the prior plan. |
+| `elicify_vertex_goal_create` | Create sequential multi-story plan under `<project>/.elicify-vertex/goals.json`; appends a final **verification** story automatically. `replace` archives the prior plan. |
 | `elicify_vertex_goal_next` | Start or return the active pending story. |
 | `elicify_vertex_goal_checkpoint` | Checkpoint active story: `complete` \| `failed` \| `blocked` + evidence. Final verification story requires `verificationReceiptId` from this session’s observed success. |
 | `elicify_vertex_goal_status` | Read/validate persisted plan (or null). |
+
+**Workspace root:** goals need a **writable project directory** (never filesystem root `/`). The plugin resolves `worktree` → `directory` → `cwd` → `$HOME` and picks the first writable path. If none work, tools fail with a clear error — open or create a project folder and retry. Do not `sudo mkdir /.elicify-vertex`.
+
+Slash: `/elicify-vertex-goal-create`, `-next`, `-checkpoint`, `-status`. If create is invoked with empty arguments, gather `brief` + `stories` before calling the tool.
+
+**Elicify-Vertex-Agent** includes a multi-story goals section: use these tools when the user wants a formal sequenced plan.
 
 State files (mode `0600`, dir `0700`): `goals.json`, `goals.ledger.jsonl`, lockfile; secrets redacted on disk (`redactForDisk`).
 
