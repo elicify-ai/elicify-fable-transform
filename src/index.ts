@@ -134,7 +134,9 @@ class DirectiveQueue {
 const DEFAULT_BLOCK = `[elicify-fable] Verification reminder: before reporting a task as done,
 - observe the actual output of the change (run the test, render the artifact, hit the endpoint);
 - ground any "done" claim in a tool result from this turn, not in intent;
-- if a step failed and you cannot fix it, surface that explicitly.`
+- if a step failed and you cannot fix it, surface that explicitly.
+What counts as verification: a Bash tool call (not echo/true/cat) that exited 0 with non-empty stdout. A Write/Edit success message is authoring, not verifying.
+A passing test is not evidence until you have confirmed the test can fail. If you did not break the test to verify it detects failure, state that as a caveat.`
 
 function defaultDirectives(): readonly Directive[] {
   return [
