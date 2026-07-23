@@ -17,6 +17,13 @@
 import { randomUUID } from "node:crypto"
 import { appendFileSync } from "node:fs"
 import type { Hooks, PluginInput, PluginOptions } from "@opencode-ai/plugin"
+import {
+  holdoutSuppresses,
+  logClassify,
+  logGateFire,
+  logHoldoutSuppress,
+  logRecoveryRepeat,
+} from "./measurement.js"
 
 type TextPart = {
   id: string
@@ -353,6 +360,11 @@ verify before claiming done, control things manually, communicate calmly.`,
           const mode = classifyTask(text)
           taskModeBySession.set(msgInput.sessionID, mode)
           debug(`chat.message: ACTIVATED session ${msgInput.sessionID} (agent=${agent || "?"}, mode=${mode})`)
+          logClassify(msgInput.sessionID, {
+            mode,
+            agent: agent || undefined,
+            trigger: triggerRe.test(text) ? opts.activeSkillTrigger : undefined,
+          })
         } else if (agent !== undefined && agent !== opts.activeAgent) {
           gate.deactivate(msgInput.sessionID)
           debug(`chat.message: DEACTIVATED session ${msgInput.sessionID} (agent=${agent})`)
@@ -411,6 +423,7 @@ verify before claiming done, control things manually, communicate calmly.`,
                 id: "vertex:repeat-failure",
                 text: `[vertex:repeat-failure] The same class of failure has repeated ${repeat.count} times. Stop retrying silently — report what failed, what you already tried, and your next hypothesis.`,
               })
+              logRecoveryRepeat(sid, { signature: repeat.signature, count: repeat.count })
               debug(`tool.after: REPEAT FAILURE detected (${repeat.count}x) for ${sid}`)
             } else {
               queue.enqueue(sid, {
@@ -499,12 +512,48 @@ verify before claiming done, control things manually, communicate calmly.`,
         // Check if the model's work is unverified
         if (!ledger.shouldBlockStop(sid)) {
           debug(`event: ${sid} — no block needed (verified or no changes)`)
+          logGateFire(sid, {
+            decision: "allow",
+            changed: ledger.hasChangedFiles(sid),
+            verified: ledger.hasVerification(sid),
+            stop_blocks: ledger.getStopBlocks(sid),
+            max_stop_blocks: opts.maxStopBlocks,
+            would_block: false,
+          })
           return
         }
 
         const blocks = ledger.getStopBlocks(sid)
+
+        // M3-style holdout: env-gated (default OFF) skip for the 'off' arm.
+        // Mirrors gate_stop.py:26-38. When VERTEX_HOLDOUT=1 AND this session
+        // is in the 'off' arm, skip the gate and log the suppression
+        // out-of-band. The model never sees the arm; the reason is
+        // measurement-only.
+        if (holdoutSuppresses(sid)) {
+          logHoldoutSuppress(sid, "stop-block skipped (holdout arm=off)")
+          logGateFire(sid, {
+            decision: "allow",
+            changed: ledger.hasChangedFiles(sid),
+            verified: ledger.hasVerification(sid),
+            stop_blocks: blocks,
+            max_stop_blocks: opts.maxStopBlocks,
+            would_block: true,
+          })
+          debug(`event: ${sid} — HOLDOUT arm=off, stop gate suppressed`)
+          return
+        }
+
         if (blocks >= opts.maxStopBlocks) {
           debug(`event: ${sid} — max stop blocks reached (${blocks}), allowing with warning`)
+          logGateFire(sid, {
+            decision: "warn",
+            changed: ledger.hasChangedFiles(sid),
+            verified: ledger.hasVerification(sid),
+            stop_blocks: blocks,
+            max_stop_blocks: opts.maxStopBlocks,
+            would_block: true,
+          })
           queue.enqueue(sid, {
             id: "vertex:stop-warning",
             text: `[vertex:stop-warning] You have claimed done ${blocks} times without observed verification. Proceeding, but this task is recorded as unverified.`,
@@ -516,6 +565,14 @@ verify before claiming done, control things manually, communicate calmly.`,
         const reason = `[vertex:stop-block] You appear to be stopping, but files were changed this turn without an observed verification command (a Bash call that exited 0 with output). Run a verification command now and cite its output, or explicitly state what remains unverified. (Block ${count}/${opts.maxStopBlocks})`
 
         queue.enqueue(sid, { id: "vertex:stop-block", text: reason })
+        logGateFire(sid, {
+          decision: "block",
+          changed: ledger.hasChangedFiles(sid),
+          verified: ledger.hasVerification(sid),
+          stop_blocks: count,
+          max_stop_blocks: opts.maxStopBlocks,
+          would_block: true,
+        })
         debug(`event: ${sid} — STOP BLOCK ${count}/${opts.maxStopBlocks} (changed files, no verification)`)
 
         // Re-prompt the model to continue
