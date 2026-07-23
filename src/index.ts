@@ -122,7 +122,7 @@ interface SessionLedger {
   stopBlocks: number
 }
 
-class EvidenceLedger {
+export class EvidenceLedger {
   private readonly ledgers = new Map<string, SessionLedger>()
 
   /** Reset per-turn state (called on each new user message). */
@@ -178,8 +178,17 @@ class EvidenceLedger {
   }
 
   incrementStopBlocks(sessionID: string): number {
-    const l = this.ledgers.get(sessionID)
-    if (!l) return 0
+    let l = this.ledgers.get(sessionID)
+    if (!l) {
+      l = {
+        changedFilesSeen: false,
+        verificationCommands: [],
+        verificationResults: [],
+        failures: [],
+        stopBlocks: 0,
+      }
+      this.ledgers.set(sessionID, l)
+    }
     l.stopBlocks++
     return l.stopBlocks
   }
@@ -214,9 +223,9 @@ class EvidenceLedger {
 // TASK CLASSIFIER — signal-routed injection
 // ===========================================================================
 
-type TaskMode = "debugging" | "render" | "build" | "baseline"
+export type TaskMode = "debugging" | "render" | "build" | "baseline"
 
-function classifyTask(text: string): TaskMode {
+export function classifyTask(text: string): TaskMode {
   const lower = text.toLowerCase()
   if (/debug|bug|error|traceback|crash|failing|not working|broken|exception/.test(lower))
     return "debugging"
@@ -227,19 +236,39 @@ function classifyTask(text: string): TaskMode {
   return "baseline"
 }
 
-function contextForMode(mode: TaskMode): Directive | null {
+export function contextForMode(mode: TaskMode): Directive | null {
   switch (mode) {
     case "debugging":
       return {
         id: "vertex:investigation",
-        text: `[vertex:investigation] Debugging signal detected. Follow the investigation protocol:
-reproduce the failure first → form 3+ competing hypotheses → gather evidence for each → trace the full causal chain → verify the fix resolves it → report which hypotheses you rejected.`,
+        text: `[vertex:investigation] Debugging signal detected. Follow this discipline:
+
+1. Reproduce first. Run the failing case and read the actual output before forming any hypothesis.
+
+2. Develop several competing hypotheses — at least three — before investigating any single one. A symptom that pattern-matches to a known failure may have a different cause. The most visible signal in the logs is not necessarily the root cause; treat it as one hypothesis among several, not the conclusion.
+
+3. For each hypothesis, identify what evidence would confirm or refute it, then gather that evidence by reading the relevant code paths end to end. Track your confidence per hypothesis as evidence accumulates.
+
+4. Trace the full causal chain. Do not stop at the first plausible cause: ask what allowed that cause to produce this symptom, and whether removing only the visible trigger would leave the defect latent. A fix that makes the test pass is not necessarily a fix that removes the defect.
+
+5. Verify before and after. Confirm the root cause with evidence before changing code. After the fix, demonstrate that the failure mode itself is gone — not merely that the triggering condition no longer occurs in this environment.
+
+6. In your report, state the hypotheses you rejected and the evidence that rejected them.`,
       }
     case "render":
       return {
         id: "vertex:grounding",
-        text: `[vertex:grounding] Render/executable artifact detected. Follow the grounding loop:
-run it in the real renderer → observe the actual output → fix what the observation reveals → re-run. A static check (lint, type-check) is not observation. Use browser tools if available.`,
+        text: `[vertex:grounding] Render/executable artifact detected. Follow this grounding loop:
+
+This is a verification MODALITY, not extra testing. The point is not "write more tests" — it is "see the thing actually behave." A static parse (xmllint, node --check, HTMLParser) confirms the file is well-formed — it does NOT confirm the artifact looks or behaves correctly. Well-formed and correct are different claims.
+
+1. RUN IT in the real renderer. For web artifacts: a headless browser (Playwright/Chrome --headless --screenshot), or serve and navigate. For SVG: render to PNG. For scripts: execute and capture stdout/stderr. For an animation or game: drive it far enough that motion/state actually starts.
+
+2. OBSERVE THE OUTPUT. Read the screenshot back. Read the console for errors. Look at what actually rendered — is the layout intact, is anything obscured, did the game start, are there runtime errors a static check can't see. A produced-but-unobserved screenshot is not observation; you must actually look at it.
+
+3. FIX WHAT THE OBSERVATION REVEALS, then re-run. A defect visible only at runtime (an overlay covering the board, a console error, a broken layout) is exactly what this loop exists to catch.
+
+Stop when you have actually looked, not after a fixed number of checks. One clean observation is enough — if the first render shows the artifact behaving and looking correct, you are done. Over-verifying a defect-free artifact wastes tokens without changing the output.`,
       }
     default:
       return null

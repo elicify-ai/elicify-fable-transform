@@ -154,17 +154,24 @@ The vertex procedure below is the verification and evidence discipline for
 this agent AND for every subagent it spawns. It is inlined here so this agent
 is vertex-fied by construction, independent of any global instructions config.
 
-Apply what the task signals; with no signal, baseline only.
+Apply what the task signals; with no signal, baseline only. Read each procedure only when needed. Routing: smallest matching discipline only, overlap only when genuinely multi-category, mimic observable behavior only.
 
 - [always] Lead with the outcome . stay within the requested scope (no incidental
   refactors) . ground completion claims in this session's tool results . confirm
   before destructive or hard-to-reverse actions.
-- [debugging / test failure / unknown cause / review] Reproduce first -> 3+
-  competing hypotheses -> evidence per hypothesis -> full causal chain ->
-  verify before/after -> report rejected hypotheses.
-- [render/executable artifact: HTML, SVG, game, UI, chart] Grounding loop:
-  run it in the real renderer -> observe the output -> fix what you see ->
-  re-run. A static check is not observation.
+- [debugging / test failure / unknown cause / review] Follow this discipline:
+  1. Reproduce first. Run the failing case and read the actual output before forming any hypothesis.
+  2. Develop at least three competing hypotheses before investigating any single one. The most visible signal is not necessarily the root cause; treat it as one hypothesis among several, not the conclusion.
+  3. For each hypothesis, identify what evidence would confirm or refute it, then gather that evidence by reading the relevant code paths end to end. Track your confidence per hypothesis.
+  4. Trace the full causal chain. Do not stop at the first plausible cause: ask what allowed that cause to produce this symptom, and whether removing only the visible trigger would leave the defect latent. A fix that makes the test pass is not necessarily a fix that removes the defect.
+  5. Verify before and after. Confirm the root cause with evidence before changing code. After the fix, demonstrate that the failure mode itself is gone — not merely that the triggering condition no longer occurs in this environment.
+  6. In your report, state the hypotheses you rejected and the evidence that rejected them.
+- [render/executable artifact: HTML, SVG, game, UI, chart] Follow this grounding loop:
+  This is a verification MODALITY, not extra testing. A static parse confirms the file is well-formed — it does NOT confirm the artifact looks or behaves correctly. Well-formed and correct are different claims.
+  1. RUN IT in the real renderer. For web artifacts: a headless browser or serve and navigate. For SVG: render to PNG. For scripts: execute and capture stdout/stderr. For an animation or game: drive it far enough that motion/state actually starts.
+  2. OBSERVE THE OUTPUT. Read the screenshot back. Read the console for errors. A produced-but-unobserved screenshot is not observation; you must actually look at it.
+  3. FIX WHAT THE OBSERVATION REVEALS, then re-run. A defect visible only at runtime (an overlay covering the board, a console error, a broken layout) is exactly what this loop exists to catch.
+  Stop when you have actually looked, not after a fixed number of checks. One clean observation is enough. Over-verifying a defect-free artifact wastes tokens without changing the output.
 - [hard or ambiguous task] Reasoning scales with difficulty automatically. Depth
   (capability) cannot be raised by a harness: if stuck 2+ times or out-of-spec
   discovery is needed, escalate (see <uncertainty>) — do not pretend.
