@@ -10,10 +10,10 @@ describe("formatDirectives", () => {
     const d: Directive = { id: "post-tool:evidence", text: "show evidence" }
     const out = formatDirectives([d])
     expect(out).not.toBeNull()
-    expect(out).toMatch(/^<fablize-directives ts="[^"]+">/)
+    expect(out).toMatch(/^<elicify-fable-directives ts="[^"]+">/)
     expect(out).toMatch(/\[post-tool:evidence\]/)
     expect(out).toMatch(/show evidence/)
-    expect(out).toMatch(/<\/fablize-directives>$/)
+    expect(out).toMatch(/<\/elicify-fable-directives>$/)
   })
 
   it("joins multiple directives with a horizontal rule", () => {

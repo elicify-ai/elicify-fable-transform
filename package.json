@@ -14,7 +14,9 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "SKILL.md",
+    "skills"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -26,11 +28,11 @@
   "keywords": [
     "opencode",
     "opencode-plugin",
-    "fablize",
-    "fable",
+    "elicify",
+    "elicify-fable",
     "harness",
     "verification",
-    "elicify"
+    "directives"
   ],
   "author": "elicify-ai",
   "license": "MIT",

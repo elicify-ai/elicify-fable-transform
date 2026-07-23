@@ -27,9 +27,9 @@
  * next LLM call.
  *
  * It is a reference implementation, not a finished product. The default
- * directive is a "fablize verification reminder" so the plugin is
- * immediately useful in a fablize-style harness, but the real value is
- * the queue + transform wiring.
+ * directive is a verification reminder so the plugin is immediately useful
+ * in an elicify-fable harness, but the real value is the queue + transform
+ * wiring.
  *
  * @see https://opencode.ai/docs/plugins/
  */
@@ -61,7 +61,7 @@ export interface Directive {
   readonly at?: string
 }
 
-export interface FableTransformOptions {
+export interface ElicifyFableTransformOptions {
   /**
    * Cap on how many directives can be queued per session. Once exceeded,
    * the oldest directive is dropped. Default: 16.
@@ -77,8 +77,8 @@ export interface FableTransformOptions {
 
   /**
    * A producer that returns a list of "always-on" directives to inject on
-   * every turn. Use this for the fablize-style contract block. Return [] to
-   * disable. Default: a minimal verification-reminder.
+   * every turn. Use this for the elicify-fable contract block. Return []
+   * to disable. Default: a minimal verification-reminder.
    */
   readonly systemDirectives?: () => readonly Directive[]
 }
@@ -131,7 +131,7 @@ class DirectiveQueue {
 // Formatting
 // ---------------------------------------------------------------------------
 
-const DEFAULT_BLOCK = `[fablize] Verification reminder: before reporting a task as done,
+const DEFAULT_BLOCK = `[elicify-fable] Verification reminder: before reporting a task as done,
 - observe the actual output of the change (run the test, render the artifact, hit the endpoint);
 - ground any "done" claim in a tool result from this turn, not in intent;
 - if a step failed and you cannot fix it, surface that explicitly.`
@@ -139,7 +139,7 @@ const DEFAULT_BLOCK = `[fablize] Verification reminder: before reporting a task 
 function defaultDirectives(): readonly Directive[] {
   return [
     {
-      id: "fablize:contract",
+      id: "elicify-fable:contract",
       text: DEFAULT_BLOCK,
     },
   ]
@@ -152,7 +152,7 @@ export function formatDirectives(directives: readonly Directive[]): string | nul
   const body = directives
     .map((d) => `[${d.id}${d.at ? ` @ ${d.at}` : ""}]\n${d.text.trim()}`)
     .join("\n\n---\n\n")
-  return `<fablize-directives ts="${stamp}">\n${body}\n</fablize-directives>`
+  return `<elicify-fable-directives ts="${stamp}">\n${body}\n</elicify-fable-directives>`
 }
 
 // ---------------------------------------------------------------------------
@@ -174,12 +174,12 @@ export function formatDirectives(directives: readonly Directive[]): string | nul
  *     all queued directives, written into the last assistant turn. Use
  *     only if `system.transform` is unavailable.
  */
-export const FableTransformPlugin: Plugin = async (ctx) => {
-  const opts: Required<FableTransformOptions> = {
+export const ElicifyFableTransformPlugin: Plugin = async (ctx) => {
+  const opts: Required<ElicifyFableTransformOptions> = {
     maxPerSession: 16,
     wireMessagesTransform: true,
     systemDirectives: defaultDirectives,
-    ...(ctx as unknown as FableTransformOptions),
+    ...(ctx as unknown as ElicifyFableTransformOptions),
   }
 
   const queue = new DirectiveQueue(opts.maxPerSession)
@@ -190,7 +190,7 @@ export const FableTransformPlugin: Plugin = async (ctx) => {
      * Optional companion API exposed on the plugin return value so other
      * plugins (or your own custom hooks) can enqueue directives:
      *
-     *   const t = await FableTransformPlugin(ctx)
+     *   const t = await ElicifyFableTransformPlugin(ctx)
      *   t.enqueue(sessionID, { id: "stop:block", text: "..." })
      *
      * Opencode's plugin API doesn't surface a "shared registry" object
@@ -251,4 +251,4 @@ export const FableTransformPlugin: Plugin = async (ctx) => {
   }
 }
 
-export default FableTransformPlugin
+export default ElicifyFableTransformPlugin

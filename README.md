@@ -48,14 +48,14 @@ For local development, point the plugin entry at your working copy:
 
 ```ts
 import type { Plugin } from "@opencode-ai/plugin"
-import FableTransformPlugin from "elicify-fable-transform"
+import ElicifyFableTransformPlugin from "elicify-fable-transform"
 
 export const MyPlugin: Plugin = async (ctx) => {
   // 1) Ensure the transform plugin is also loaded (opencode loads it
   //    from opencode.json — no need to require() it here).
   // 2) In a Stop or PostToolUse hook, write a directive into the
   //    transform plugin's queue via a shared module:
-  const t = await FableTransformPlugin(ctx)
+  const t = await ElicifyFableTransformPlugin(ctx)
 
   return {
     async event({ event }) {
@@ -88,13 +88,13 @@ interface Directive {
 }
 ```
 
-### `FableTransformOptions`
+### `ElicifyFableTransformOptions`
 
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `maxPerSession` | `number` | `16` | Cap on queued directives per session. Oldest is dropped. |
 | `wireMessagesTransform` | `boolean` | `true` | Also wire the messages-array rewrite as a fallback. |
-| `systemDirectives` | `() => Directive[]` | fablize reminder | Always-on directives injected every turn. |
+| `systemDirectives` | `() => Directive[]` | elicify-fable reminder | Always-on directives injected every turn. |
 
 ### `formatDirectives(directives)`
 
@@ -113,7 +113,7 @@ to a system prompt.
   both add to the existing output so other plugins' transforms are
   preserved.
 - **Tagged synthetic content.** Directives are wrapped in
-  `<fablize-directives ts="...">...</fablize-directives>` so they are
+  `<elicify-fable-directives ts="...">...</elicify-fable-directives>` so they are
   easy to grep for in logs and easy for the model to recognise as
   harness-injected (not user-typed).
 - **Fails open.** No throw paths in the hooks — a broken transform must
@@ -131,3 +131,8 @@ npm run build
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+## Companion artifacts
+
+- **Skill:** `SKILL.md` (and `skills/elicify-fable-transform/SKILL.md`) — installable into `~/.config/opencode/skills/elicify-fable-transform/` for the `/elicify-fable-transform` slash command.
+- **Architect agent:** **Elicify-Fable-Architect** — the principal orchestrator that uses this transform plugin to inject verification reminders. Lives in `~/.config/opencode/agents/elicify-fable-architect.md`.
