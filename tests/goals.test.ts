@@ -1,0 +1,245 @@
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import { afterEach, describe, expect, it } from "vitest"
+
+import { ElicifyVertexPlugin } from "../src/index.js"
+import {
+  MultiStoryGoalEngine,
+  VerificationReceiptStore,
+  type VerificationReceipt,
+} from "../src/goals.js"
+
+// Item 5 ports create → next → checkpoint while closing fablize's string-only
+// final gate and false "all complete" state
+// (/tmp/fablize-deep/scripts/goals.py:69-111).
+
+const roots: string[] = []
+
+function temporaryRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "vertex-goals-"))
+  roots.push(root)
+  return root
+}
+
+function tickingClock(): () => string {
+  let tick = 0
+  return () => new Date(Date.UTC(2026, 6, 23, 12, 0, tick++)).toISOString()
+}
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+describe("MultiStoryGoalEngine", () => {
+  it("creates a validated sequential plan and appends an explicit final verification story", () => {
+    const engine = new MultiStoryGoalEngine(temporaryRoot(), tickingClock())
+    const plan = engine.create("Deliver the feature", [
+      { title: "Implement", objective: "Build the feature" },
+      { title: "Document", objective: "Update usage docs" },
+    ])
+
+    expect(plan).toMatchObject({ schemaVersion: 1, revision: 1, status: "active", activeStoryId: null })
+    expect(plan.stories).toHaveLength(3)
+    expect(plan.stories.map((story) => story.id)).toEqual(["G001", "G002", "G003"])
+    expect(plan.stories.at(-1)).toMatchObject({ kind: "verification", status: "pending" })
+    expect(statSync(engine.statePath).mode & 0o777).toBe(0o600)
+    expect(statSync(engine.ledgerPath).mode & 0o777).toBe(0o600)
+  })
+
+  it("requires nonblank structured work stories and explicit replacement", () => {
+    const engine = new MultiStoryGoalEngine(temporaryRoot())
+    expect(() => engine.create("brief", [])).toThrow(/at least one work story/i)
+    expect(() => engine.create("brief", [{ title: "", objective: "work" }])).toThrow(/title must not be blank/i)
+    engine.create("brief", [{ title: "one", objective: "work" }])
+    expect(() => engine.create("other", [{ title: "two", objective: "work" }])).toThrow(/already exists/i)
+    const replacement = engine.create("other", [{ title: "two", objective: "work" }], true)
+    expect(replacement.brief).toBe("other")
+    expect(existsSync(join(engine.stateDirectory, "archive"))).toBe(true)
+  })
+
+  it("starts only one story and returns the same active story on repeated next", () => {
+    const engine = new MultiStoryGoalEngine(temporaryRoot(), tickingClock())
+    engine.create("brief", [{ title: "one", objective: "work" }])
+    const started = engine.next()
+    const repeated = engine.next()
+    expect(started.activeStoryId).toBe("G001")
+    expect(started.stories[0].status).toBe("in_progress")
+    expect(repeated.revision).toBe(started.revision)
+    expect(repeated.activeStoryId).toBe("G001")
+  })
+
+  it("requires evidence and rejects checkpoints for non-active stories", () => {
+    const engine = new MultiStoryGoalEngine(temporaryRoot())
+    engine.create("brief", [{ title: "one", objective: "work" }])
+    engine.next()
+    expect(() => engine.checkpoint("G002", "complete", "evidence")).toThrow(/not the active/i)
+    expect(() => engine.checkpoint("G001", "complete", " ")).toThrow(/evidence must not be blank/i)
+  })
+
+  it("halts as blocked or failed and never reports the plan complete", () => {
+    for (const status of ["blocked", "failed"] as const) {
+      const engine = new MultiStoryGoalEngine(temporaryRoot())
+      engine.create("brief", [{ title: "one", objective: "work" }])
+      engine.next()
+      const plan = engine.checkpoint("G001", status, `${status} evidence`)
+      expect(plan.status).toBe(status)
+      expect(plan.status).not.toBe("complete")
+      expect(() => engine.next()).toThrow(new RegExp(`plan is ${status}`, "i"))
+    }
+  })
+
+  it("rejects caller-authored final proof and accepts only a current observed receipt", () => {
+    const root = temporaryRoot()
+    const engine = new MultiStoryGoalEngine(root, tickingClock())
+    engine.create("brief", [{ title: "one", objective: "work" }])
+    engine.next()
+    engine.checkpoint("G001", "complete", "implementation observed")
+    const finalStory = engine.next().stories[1]
+
+    expect(() => engine.checkpoint(finalStory.id, "complete", "trust me")).toThrow(/requires an observed/i)
+    const wrongRoot = {
+      id: "vrf_wrong",
+      sessionID: "s1",
+      workspaceRoot: temporaryRoot(),
+      command: "npm test",
+      exitCode: 0,
+      outcome: "verified",
+      outputSummary: "10 passed",
+      observedAt: "2026-07-23T13:00:00.000Z",
+    } satisfies VerificationReceipt
+    expect(() => engine.checkpoint(finalStory.id, "complete", "proof", wrongRoot)).toThrow(/different workspace/i)
+  })
+
+  it("persists a complete plan only after every story and a successful final receipt", () => {
+    const root = temporaryRoot()
+    const engine = new MultiStoryGoalEngine(root, tickingClock())
+    engine.create("brief", [
+      { title: "one", objective: "first" },
+      { title: "two", objective: "second" },
+    ])
+    engine.next()
+    engine.checkpoint("G001", "complete", "first complete")
+    engine.next()
+    engine.checkpoint("G002", "complete", "second complete")
+    const finalPlan = engine.next()
+    const receipt: VerificationReceipt = {
+      id: "vrf_final",
+      sessionID: "s1",
+      workspaceRoot: root,
+      command: "npm test",
+      exitCode: 0,
+      outcome: "verified",
+      outputSummary: "163 passed",
+      observedAt: "2026-07-23T13:00:00.000Z",
+    }
+    const complete = engine.checkpoint(finalPlan.activeStoryId!, "complete", "all exit proofs passed", receipt)
+
+    expect(complete.status).toBe("complete")
+    expect(complete.stories.every((story) => story.status === "complete")).toBe(true)
+    expect(complete.stories.at(-1)?.verification?.id).toBe("vrf_final")
+    expect(new MultiStoryGoalEngine(root).status()).toEqual(complete)
+  })
+
+  it("redacts all snapshot and ledger strings at the write boundary", () => {
+    const engine = new MultiStoryGoalEngine(temporaryRoot())
+    engine.create("password=secret value", [{ title: "one", objective: "Bearer abcdefghijklmnopqrstuvwxyz" }])
+    engine.next()
+    engine.checkpoint("G001", "complete", "token=another-secret")
+    const disk = readFileSync(engine.statePath, "utf8") + readFileSync(engine.ledgerPath, "utf8")
+    expect(disk).not.toContain("secret value")
+    expect(disk).not.toContain("abcdefghijklmnopqrstuvwxyz")
+    expect(disk).not.toContain("another-secret")
+    expect(disk).toContain("[REDACTED]")
+  })
+
+  it("rejects corrupt state without overwriting it", () => {
+    const engine = new MultiStoryGoalEngine(temporaryRoot())
+    mkdirSync(engine.stateDirectory, { recursive: true })
+    writeFileSync(engine.statePath, "{broken", "utf8")
+    expect(() => engine.status()).toThrow(/cannot read goal plan/i)
+    expect(readFileSync(engine.statePath, "utf8")).toBe("{broken")
+  })
+
+  it("does not remove a live lock owned by another process", () => {
+    const engine = new MultiStoryGoalEngine(temporaryRoot())
+    engine.create("brief", [{ title: "one", objective: "work" }])
+    const lockPath = join(engine.stateDirectory, "goals.lock")
+    writeFileSync(lockPath, "other process", "utf8")
+    expect(() => engine.next()).toThrow(/another process/i)
+    expect(existsSync(lockPath)).toBe(true)
+  })
+})
+
+describe("VerificationReceiptStore", () => {
+  it("binds receipts to sessions and redacts command/output before storage", () => {
+    const store = new VerificationReceiptStore()
+    const receipt = store.record({
+      sessionID: "s1",
+      workspaceRoot: "/work",
+      command: "curl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz'",
+      exitCode: 0,
+      outcome: "verified",
+      outputSummary: "password=secret-value",
+      observedAt: "2026-07-23T12:00:00.000Z",
+    })
+    expect(receipt.command).not.toContain("abcdefghijklmnopqrstuvwxyz")
+    expect(receipt.outputSummary).not.toContain("secret-value")
+    expect(store.get("s1", receipt.id)).toEqual(receipt)
+    expect(store.get("other", receipt.id)).toBeNull()
+  })
+})
+
+describe("OpenCode goal-tool integration", () => {
+  it("captures a real bash verification receipt and opens the final gate", async () => {
+    const root = temporaryRoot()
+    const hooks = await ElicifyVertexPlugin({ worktree: root, directory: root } as any, undefined)
+    const context = { sessionID: "s1", worktree: root, directory: root } as any
+    const tools = hooks.tool!
+
+    await tools.vertex_goal_create.execute({
+      brief: "integrated plan",
+      stories: [{ title: "work", objective: "implement" }],
+      replace: false,
+    }, context)
+    await tools.vertex_goal_next.execute({}, context)
+    await tools.vertex_goal_checkpoint.execute({
+      id: "G001",
+      status: "complete",
+      evidence: "implemented",
+    }, context)
+    await tools.vertex_goal_next.execute({}, context)
+
+    const bashOutput = {
+      title: "tests",
+      output: "163 passed",
+      metadata: { exit: 0 } as Record<string, unknown>,
+    }
+    await hooks["tool.execute.after"]!({
+      tool: "bash",
+      sessionID: "s1",
+      callID: "call-1",
+      args: { command: "npm test" },
+    }, bashOutput)
+    const receiptID = bashOutput.metadata.vertexVerificationReceiptId as string | undefined
+    expect(receiptID).toBeDefined()
+    expect(bashOutput.output).toContain(receiptID)
+
+    const result = await tools.vertex_goal_checkpoint.execute({
+      id: "G002",
+      status: "complete",
+      evidence: "full suite passed",
+      verificationReceiptId: receiptID,
+    }, context)
+    expect(JSON.parse(result as string)).toMatchObject({ status: "complete", activeStoryId: null })
+  })
+})

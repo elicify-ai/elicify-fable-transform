@@ -43,6 +43,41 @@ describe("ElicifyVertexPlugin.config", () => {
     expect(input.command).toBeDefined()
     expect(input.command!["elicify-vertex"]).toBeDefined()
   })
+
+  it("exposes create/next/checkpoint/status goal commands through the config hook", async () => {
+    const hooks = await ElicifyVertexPlugin({} as any, undefined)
+    const input: { command: Record<string, any> } = { command: {} }
+    await hooks.config!(input as any)
+
+    for (const name of [
+      "vertex-goal-create",
+      "vertex-goal-next",
+      "vertex-goal-checkpoint",
+      "vertex-goal-status",
+    ]) {
+      expect(input.command[name]?.description).toEqual(expect.any(String))
+      expect(input.command[name]?.template).toEqual(expect.any(String))
+      expect(input.command[name]?.prompt).toBeUndefined()
+    }
+  })
+
+  it("does not overwrite user-provided goal commands", async () => {
+    const hooks = await ElicifyVertexPlugin({} as any, undefined)
+    const userCommand = { description: "custom", template: "custom template" }
+    const input = { command: { "vertex-goal-next": userCommand } }
+    await hooks.config!(input as any)
+    expect(input.command["vertex-goal-next"]).toBe(userCommand)
+  })
+
+  it("registers all four typed goal tools", async () => {
+    const hooks = await ElicifyVertexPlugin({} as any, undefined)
+    expect(Object.keys(hooks.tool ?? {})).toEqual(expect.arrayContaining([
+      "vertex_goal_create",
+      "vertex_goal_next",
+      "vertex_goal_checkpoint",
+      "vertex_goal_status",
+    ]))
+  })
 })
 
 describe("ElicifyVertexPlugin.chat.message activation gate", () => {

@@ -16,7 +16,12 @@
 
 import { randomUUID } from "node:crypto"
 import { appendFileSync, chmodSync } from "node:fs"
-import type { Hooks, PluginInput, PluginOptions } from "@opencode-ai/plugin"
+import { tool, type Hooks, type PluginInput, type PluginOptions } from "@opencode-ai/plugin"
+import {
+  MultiStoryGoalEngine,
+  VerificationReceiptStore,
+  type GoalStoryInput,
+} from "./goals.js"
 import {
   holdoutSuppresses,
   logClassify,
@@ -756,6 +761,14 @@ export const ElicifyVertexPlugin = async (
   const queue = new DirectiveQueue(opts.maxPerSession)
   const gate = new SessionGate()
   const ledger = new EvidenceLedger()
+  const verificationReceipts = new VerificationReceiptStore()
+  const goalRootsBySession = new Map<string, string>()
+
+  const goalEngine = (context: { sessionID: string; directory: string; worktree: string }) => {
+    const root = context.worktree || context.directory
+    goalRootsBySession.set(context.sessionID, root)
+    return new MultiStoryGoalEngine(root)
+  }
 
   // Last-seen task classification per session (for signal routing).
   const taskModeBySession = new Map<string, TaskMode>()
@@ -783,6 +796,58 @@ export const ElicifyVertexPlugin = async (
   const alwaysOn = () => opts.systemDirectives().map((d) => ({ ...d }))
 
   return {
+    // ── TOOLS: persistent multi-story goal engine ─────────────────────────
+    tool: {
+      vertex_goal_create: tool({
+        description: "Create a sequential multi-story goal plan with an automatically appended final verification gate.",
+        args: {
+          brief: tool.schema.string().min(1),
+          stories: tool.schema.array(tool.schema.object({
+            title: tool.schema.string().min(1),
+            objective: tool.schema.string().min(1),
+          })).min(1),
+          replace: tool.schema.boolean().optional().default(false),
+        },
+        async execute(args, context) {
+          const plan = goalEngine(context).create(args.brief, args.stories as GoalStoryInput[], args.replace)
+          return JSON.stringify(plan, null, 2)
+        },
+      }),
+      vertex_goal_next: tool({
+        description: "Return the active story or start the next pending story in the persisted goal plan.",
+        args: {},
+        async execute(_args, context) {
+          return JSON.stringify(goalEngine(context).next(), null, 2)
+        },
+      }),
+      vertex_goal_checkpoint: tool({
+        description: "Checkpoint the active story. Final completion requires an observed verification receipt from this session.",
+        args: {
+          id: tool.schema.string().min(1),
+          status: tool.schema.enum(["complete", "failed", "blocked"]),
+          evidence: tool.schema.string().min(1),
+          verificationReceiptId: tool.schema.string().optional(),
+        },
+        async execute(args, context) {
+          const receipt = args.verificationReceiptId
+            ? verificationReceipts.get(context.sessionID, args.verificationReceiptId)
+            : null
+          if (args.verificationReceiptId && !receipt) {
+            throw new Error("verification receipt was not observed in this session")
+          }
+          const plan = goalEngine(context).checkpoint(args.id, args.status, args.evidence, receipt)
+          return JSON.stringify(plan, null, 2)
+        },
+      }),
+      vertex_goal_status: tool({
+        description: "Read and validate the persisted multi-story goal plan for the current worktree.",
+        args: {},
+        async execute(_args, context) {
+          return JSON.stringify(goalEngine(context).status(), null, 2)
+        },
+      }),
+    },
+
     // ── CONFIG: register /elicify-vertex command ──────────────────────────
     async config(cfgInput: any) {
       debug("config hook fired")
@@ -806,6 +871,27 @@ Never ask again.
 Then proceed with the user's request under the vertex verification discipline:
 verify before claiming done, control things manually, communicate calmly.`,
         }
+      }
+      const goalCommands: Record<string, { description: string; template: string }> = {
+        "vertex-goal-create": {
+          description: "Create a persisted multi-story goal plan.",
+          template: "Use vertex_goal_create to create a sequential plan from these arguments. Do not omit the final verification gate; it is appended automatically. Arguments: $ARGUMENTS",
+        },
+        "vertex-goal-next": {
+          description: "Start or resume the next story in the persisted goal plan.",
+          template: "Call vertex_goal_next, report the active story, and work only that story until it is checkpointed.",
+        },
+        "vertex-goal-checkpoint": {
+          description: "Checkpoint the active story with evidence.",
+          template: "Call vertex_goal_checkpoint using these arguments. A final complete checkpoint must use the receipt ID from an observed successful verification command. Arguments: $ARGUMENTS",
+        },
+        "vertex-goal-status": {
+          description: "Show the validated persisted multi-story goal plan.",
+          template: "Call vertex_goal_status and report the current plan, active story, and next legal transition.",
+        },
+      }
+      for (const [name, command] of Object.entries(goalCommands)) {
+        cfgInput.command[name] ??= command
       }
     },
 
@@ -852,9 +938,7 @@ verify before claiming done, control things manually, communicate calmly.`,
     // ── TOOL.EXECUTE.AFTER: the READ PATH ─────────────────────────────────
     async "tool.execute.after"(toolInput, toolOutput) {
       const sid = toolInput.sessionID
-      if (!gate.isActive(sid)) return
-
-      const tool = toolInput.tool
+      const toolName = toolInput.tool
       const args = toolInput.args ?? {}
       const out = toolOutput.output ?? ""
       const meta = toolOutput.metadata ?? {}
@@ -865,29 +949,48 @@ verify before claiming done, control things manually, communicate calmly.`,
           : undefined
 
       try {
+        const command = toolName === "bash" && typeof args.command === "string" ? args.command : ""
+        const verification = toolName === "bash" ? parseVerification(command, out, exitCode) : null
+
+        // Goal receipts work independently of the session directive gate: the
+        // config-hook goal commands can be used from any primary agent.
+        if (verification?.outcome === "verified" && exitCode === 0) {
+          const workspaceRoot = goalRootsBySession.get(sid)
+          if (workspaceRoot) {
+            const receipt = verificationReceipts.record({
+              sessionID: sid,
+              workspaceRoot,
+              command,
+              exitCode: 0,
+              outcome: "verified",
+              outputSummary: out,
+              observedAt: new Date().toISOString(),
+            })
+            const receiptText = `[vertex:verification-receipt] ${receipt.id}`
+            toolOutput.output = `${out}${out && !out.endsWith("\n") ? "\n" : ""}${receiptText}`
+            toolOutput.metadata = { ...meta, vertexVerificationReceiptId: receipt.id }
+          }
+        }
+
+        if (!gate.isActive(sid)) return
+
         // ── Edit/Write: record file changes ──────────────────────────────
-        if (tool === "edit" || tool === "write") {
+        if (toolName === "edit" || toolName === "write") {
           const fp = typeof args.filePath === "string" ? args.filePath : ""
           ledger.recordChangedFiles(sid, fp)
-          debug(`tool.after: ${tool} on ${fp || "?"} → file changed recorded for ${sid}`)
+          debug(`tool.after: ${toolName} on ${fp || "?"} → file changed recorded for ${sid}`)
         }
 
         // ── Bash: record verification or failure (strictly better than fablize) ──
-        if (tool === "bash") {
-          const command = typeof args.command === "string" ? args.command : ""
-          // parseVerification uses the POSITIVE allowlist (not just the negative
-          // denylist) and checks failure/success patterns in the output text.
-          // Mirrors fablize parse_tool_result.py:14-30 with extensions.
-          const result = parseVerification(command, out, exitCode)
-
-          if (result.isVerificationCommand) {
+        if (toolName === "bash" && verification) {
+          if (verification.isVerificationCommand) {
             // Count only a reliable exit 0 with no contradictory failure
             // output. Silent verifiers such as tsc are valid evidence.
-            const success = result.outcome === "verified"
+            const success = verification.outcome === "verified"
             if (exitCode !== undefined) {
               ledger.recordVerification(sid, command, exitCode, success)
             }
-            debug(`tool.after: bash "${command.slice(0, 60)}" → outcome=${result.outcome}, verified=${success}, pattern=${result.matchedPattern}`)
+            debug(`tool.after: bash "${command.slice(0, 60)}" → outcome=${verification.outcome}, verified=${success}, pattern=${verification.matchedPattern}`)
           }
 
           // Failure detection
