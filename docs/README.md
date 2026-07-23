@@ -13,3 +13,16 @@ This directory holds developer and power-user detail, grounded in the package so
 **Package:** `@elicify-ai/elicify-vertex` (see root `package.json`)
 
 **Primary sources:** `src/index.ts`, `src/plugin.ts`, `src/goals.ts`, `src/measurement.ts`, `src/redaction.ts`
+
+## Governance & legal
+
+| Doc | Purpose |
+|-----|---------|
+| [LICENSE](../LICENSE) | MIT license (copyright elicify.ai Pte. Ltd.) |
+| [CLA.md](../CLA.md) | Contributor License Agreement |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | How to contribute |
+| [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) | Community standards |
+| [SECURITY.md](../SECURITY.md) | Vulnerability reporting |
+| [SUPPORT.md](../SUPPORT.md) | Where to get help |
+| [TRADEMARKS.md](../TRADEMARKS.md) | Brand / name policy |
+

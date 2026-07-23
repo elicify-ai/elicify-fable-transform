@@ -1,0 +1,12 @@
+# Funding configuration for the GitHub Sponsors button.
+#
+# Uncomment entries as elicify.ai Pte. Ltd. enables them. Until at least one is
+# active, no Sponsor button is shown — better than a broken link.
+#
+# Reference: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customization/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+
+# github: elicify-ai
+# patreon: ""
+# open_collective: ""
+# ko_fi: ""
+custom: ["https://github.com/elicify-ai/elicify-vertex"]

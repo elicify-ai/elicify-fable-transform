@@ -1,0 +1,26 @@
+# elicify-vertex CODEOWNERS
+#
+# Default reviewers for paths. Combined with branch protection that requires a
+# code-owner review, this gives elicify.ai Pte. Ltd. control over what merges
+# into `main`.
+#
+# https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customization/customizing-your-repository/about-code-owners
+
+# Default owner
+*                                       @daniel-piatkowski-ai
+
+# Governance & legal
+LICENSE                                 @daniel-piatkowski-ai
+CLA.md                                  @daniel-piatkowski-ai
+TRADEMARKS.md                           @daniel-piatkowski-ai
+SECURITY.md                             @daniel-piatkowski-ai
+CODE_OF_CONDUCT.md                      @daniel-piatkowski-ai
+CONTRIBUTING.md                         @daniel-piatkowski-ai
+SUPPORT.md                              @daniel-piatkowski-ai
+.github/CODEOWNERS                      @daniel-piatkowski-ai
+.github/FUNDING.yml                     @daniel-piatkowski-ai
+.github/workflows/                      @daniel-piatkowski-ai
+
+# Core plugin surface
+src/                                    @daniel-piatkowski-ai
+package.json                            @daniel-piatkowski-ai

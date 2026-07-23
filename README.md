@@ -123,6 +123,25 @@ If the plugin errors, it fails open (silent) so a broken harness never blocks yo
 
 ---
 
+## Contributing
+
+Issues, PRs, and discussions are welcome.
+
+| If you want to… | Go to |
+|---|---|
+| Find live work | [open issues](https://github.com/elicify-ai/elicify-vertex/issues) |
+| Ask a question / get help | [SUPPORT.md](./SUPPORT.md) |
+| Set up to build | [CONTRIBUTING.md](./CONTRIBUTING.md) |
+| Community expectations | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) |
+| Report a vulnerability | [SECURITY.md](./SECURITY.md) |
+| Sign the CLA (before your first PR) | [Contributor License Agreement](./CLA.md) |
+
+The **elicify-vertex** name is reserved per the [trademark policy](./TRADEMARKS.md).
+
+External contributors sign a one-time [CLA](./CLA.md) before their first PR can merge. You keep copyright to your contribution; the CLA grants elicify.ai Pte. Ltd. a license to use it in the project.
+
+---
+
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+[MIT](./LICENSE) · Copyright © 2026 [elicify.ai Pte. Ltd.](https://github.com/elicify-ai)

@@ -24,6 +24,12 @@
     "docs",
     "README.md",
     "LICENSE",
+    "CLA.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "TRADEMARKS.md",
     "SKILL.md",
     "skills",
     "agents",
@@ -50,7 +56,11 @@
     "verification",
     "directives"
   ],
-  "author": "elicify-ai",
+  "author": {
+    "name": "elicify.ai Pte. Ltd.",
+    "email": "connect@elicify.ai",
+    "url": "https://github.com/elicify-ai"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
