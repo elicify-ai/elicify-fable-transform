@@ -67,16 +67,27 @@ describe("redactSecrets", () => {
     "api_key=sk-abcdefghijklmnopqrstuvwxyz",
     "password: super-secret-value",
     "password=\"secret value with spaces\"",
+    "password=correct horse battery staple",
+    "AWS_SECRET_ACCESS_KEY=abcdefghijklmnopqrstuvwxyz",
     "token ghp_abcdefghijklmnopqrstuvwxyz",
+    "npm_abcdefghijklmnopqrstuvwxyz",
+    "glpat-abcdefghijklmnopqrstuvwxyz",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyMTIzIn0.dGVzdHNpZ25hdHVyZQ",
+    "AccountKey=abcdefghijklmnopqrstuvwxyz",
     "xoxb-abcdefghijklmnopqrstuvwxyz",
     "https://user:password@example.test/path",
+    "postgres://user:password@db.internal/app",
+    "private_key=-----BEGIN PRIVATE KEY-----\nVERYPRIVATE\n-----END PRIVATE KEY-----",
   ])("removes secret material from %s", (input) => {
     const redacted = redactSecrets(input)
-    expect(redacted).toContain("[REDACTED]")
+    expect(redacted).toMatch(/\[REDACTED(?::JWT)?\]/)
     expect(redacted).not.toContain("abcdefghijklmnopqrstuvwxyz")
     expect(redacted).not.toContain("super-secret-value")
     expect(redacted).not.toContain("secret value with spaces")
+    expect(redacted).not.toContain("correct horse battery staple")
     expect(redacted).not.toContain("user:password")
+    expect(redacted).not.toContain("VERYPRIVATE")
+    expect(redacted).not.toContain("eyJhbGci")
   })
 
   it("recursively redacts sensitive object keys, nested strings, arrays, and cycles", () => {
@@ -85,6 +96,8 @@ describe("redactSecrets", () => {
       nested: {
         message: "Bearer abcdefghijklmnopqrstuvwxyz",
         api_key: "another-value",
+        "x-api-key": "header-value",
+        "set-cookie": "session=secret-value",
       },
       values: ["token=secret-value", "safe"],
     }
@@ -95,6 +108,8 @@ describe("redactSecrets", () => {
     expect(redacted.nested).toEqual({
       message: "Bearer [REDACTED]",
       api_key: "[REDACTED]",
+      "x-api-key": "[REDACTED]",
+      "set-cookie": "[REDACTED]",
     })
     expect(redacted.values).toEqual(["token=[REDACTED]", "safe"])
     expect(redacted.self).toBe("[REDACTED:CIRCULAR]")

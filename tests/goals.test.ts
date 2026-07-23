@@ -115,7 +115,7 @@ describe("MultiStoryGoalEngine", () => {
       exitCode: 0,
       outcome: "verified",
       outputSummary: "10 passed",
-      observedAt: "2026-07-23T13:00:00.000Z",
+      observedAt: "2026-07-23T12:00:10.500Z",
     } satisfies VerificationReceipt
     expect(() => engine.checkpoint(finalStory.id, "complete", "proof", wrongRoot)).toThrow(/different workspace/i)
   })
@@ -140,7 +140,7 @@ describe("MultiStoryGoalEngine", () => {
       exitCode: 0,
       outcome: "verified",
       outputSummary: "163 passed",
-      observedAt: "2026-07-23T13:00:00.000Z",
+      observedAt: new Date(Date.parse(finalPlan.stories.at(-1)!.startedAt!) + 1).toISOString(),
     }
     const complete = engine.checkpoint(finalPlan.activeStoryId!, "complete", "all exit proofs passed", receipt)
 
@@ -168,6 +168,30 @@ describe("MultiStoryGoalEngine", () => {
     writeFileSync(engine.statePath, "{broken", "utf8")
     expect(() => engine.status()).toThrow(/cannot read goal plan/i)
     expect(readFileSync(engine.statePath, "utf8")).toBe("{broken")
+  })
+
+  it("rejects semantically forged completion receipts", () => {
+    const engine = new MultiStoryGoalEngine(temporaryRoot())
+    const plan = engine.create("brief", [{ title: "one", objective: "work" }])
+    plan.status = "complete"
+    for (const story of plan.stories) {
+      story.status = "complete"
+      story.evidence = "claimed evidence"
+      story.startedAt = "2026-07-23T12:00:00.000Z"
+      story.completedAt = "2026-07-23T12:02:00.000Z"
+    }
+    plan.stories.at(-1)!.verification = {
+      id: "vrf_forged",
+      sessionID: "forged-session",
+      workspaceRoot: "/different-workspace",
+      command: "npm test",
+      outcome: "verified",
+      exitCode: 0,
+      outputSummary: "all passed",
+      observedAt: "2026-07-23T12:01:00.000Z",
+    }
+    writeFileSync(engine.statePath, JSON.stringify(plan), "utf8")
+    expect(() => engine.status()).toThrow(/lacks a successful final verification receipt/i)
   })
 
   it("does not remove a live lock owned by another process", () => {
@@ -241,5 +265,44 @@ describe("OpenCode goal-tool integration", () => {
       verificationReceiptId: receiptID,
     }, context)
     expect(JSON.parse(result as string)).toMatchObject({ status: "complete", activeStoryId: null })
+  })
+
+  it("invalidates a verification receipt when files change afterward", async () => {
+    const root = temporaryRoot()
+    const hooks = await ElicifyVertexPlugin({ worktree: root, directory: root } as any, undefined)
+    const context = { sessionID: "s1", worktree: root, directory: root } as any
+    const tools = hooks.tool!
+    await tools.vertex_goal_create.execute({
+      brief: "receipt freshness",
+      stories: [{ title: "work", objective: "implement" }],
+      replace: false,
+    }, context)
+    await tools.vertex_goal_next.execute({}, context)
+    await tools.vertex_goal_checkpoint.execute({ id: "G001", status: "complete", evidence: "done" }, context)
+    await tools.vertex_goal_next.execute({}, context)
+
+    const bashOutput = { title: "tests", output: "195 passed", metadata: { exit: 0 } as Record<string, unknown> }
+    await hooks["tool.execute.after"]!({
+      tool: "bash",
+      sessionID: "s1",
+      callID: "verify",
+      args: { command: "npm test" },
+    }, bashOutput)
+    const receiptID = bashOutput.metadata.vertexVerificationReceiptId as string
+    expect(receiptID).toMatch(/^vrf_/)
+
+    await hooks["tool.execute.after"]!({
+      tool: "apply_patch",
+      sessionID: "s1",
+      callID: "edit-after-verify",
+      args: { patchText: "*** Begin Patch\n*** Update File: src/index.ts\n*** End Patch" },
+    }, { title: "patch", output: "done", metadata: {} })
+
+    await expect(tools.vertex_goal_checkpoint.execute({
+      id: "G002",
+      status: "complete",
+      evidence: "stale proof",
+      verificationReceiptId: receiptID,
+    }, context)).rejects.toThrow(/not observed in this session/i)
   })
 })

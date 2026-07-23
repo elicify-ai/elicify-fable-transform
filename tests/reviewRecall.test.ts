@@ -16,6 +16,11 @@ describe("isReviewTask", () => {
     "perform a code-review",
     "red-team this implementation",
     "critique the API design",
+    "look over this patch",
+    "find bugs in this PR",
+    "check for vulnerabilities in the endpoint",
+    "evaluate this pull request for correctness",
+    "find security flaws in this endpoint",
     "이 코드를 검토해주세요",
     "보안 감사를 수행하세요",
   ])("detects review intent: %s", (prompt) => {
@@ -50,7 +55,7 @@ describe("review-recall system routing", () => {
     const hooks = await ElicifyVertexPlugin({} as any, undefined)
     await hooks["chat.message"]!({ sessionID: "s1", agent: "elicify-vertex-agent" } as any, {
       message: {} as any,
-      parts: [{ type: "text", text: prompt }],
+      parts: [{ type: "text", text: prompt } as any],
     })
     const output = { system: [] as string[] }
     await hooks["experimental.chat.system.transform"]!({ sessionID: "s1", model: {} as any }, output)

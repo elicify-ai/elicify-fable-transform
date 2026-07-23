@@ -73,6 +73,10 @@ function requireNonBlank(value: string, name: string): string {
   return result
 }
 
+function isValidTimestamp(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "" && Number.isFinite(Date.parse(value))
+}
+
 /** In-memory verified-command receipts. The persisted final checkpoint embeds
  * a sanitized copy, unlike fablize's caller-authored verify strings
  * (/tmp/fablize-deep/scripts/goals.py:98-108). */
@@ -97,6 +101,10 @@ export class VerificationReceiptStore {
 
   get(sessionID: string, receiptID: string): VerificationReceipt | null {
     return this.bySession.get(sessionID)?.find((receipt) => receipt.id === receiptID) ?? null
+  }
+
+  invalidate(sessionID: string): void {
+    this.bySession.delete(sessionID)
   }
 }
 
@@ -199,6 +207,7 @@ export class MultiStoryGoalEngine {
         throw new Error(`story ${storyID} is not the active in-progress story`)
       }
       const cleanEvidence = requireNonBlank(evidence, "evidence")
+      const checkpointedAt = this.now()
 
       if (status === "complete" && story.kind === "verification") {
         const previousComplete = plan.stories
@@ -214,6 +223,9 @@ export class MultiStoryGoalEngine {
         if (!story.startedAt || receipt.observedAt < story.startedAt) {
           throw new Error("verification receipt predates the final verification story")
         }
+        if (receipt.observedAt > checkpointedAt) {
+          throw new Error("verification receipt timestamp is in the future")
+        }
         story.verification = receipt
       } else if (receipt) {
         throw new Error("verification receipts are accepted only by the final verification story")
@@ -221,7 +233,7 @@ export class MultiStoryGoalEngine {
 
       story.status = status
       story.evidence = cleanEvidence
-      story.completedAt = this.now()
+      story.completedAt = checkpointedAt
       plan.activeStoryId = null
       if (status === "failed" || status === "blocked") {
         plan.status = status
@@ -314,8 +326,20 @@ export class MultiStoryGoalEngine {
         throw new Error("complete goal plan contains unfinished stories")
       }
       if (!isRecord(finalStory.verification)
+        || typeof finalStory.verification.id !== "string" || !finalStory.verification.id.trim()
+        || typeof finalStory.verification.sessionID !== "string" || !finalStory.verification.sessionID.trim()
+        || typeof finalStory.verification.workspaceRoot !== "string"
+        || resolve(finalStory.verification.workspaceRoot) !== this.root
+        || typeof finalStory.verification.command !== "string" || !finalStory.verification.command.trim()
+        || typeof finalStory.verification.outputSummary !== "string"
+        || !isValidTimestamp(finalStory.verification.observedAt)
         || finalStory.verification.outcome !== "verified"
-        || finalStory.verification.exitCode !== 0) {
+        || finalStory.verification.exitCode !== 0
+        || typeof finalStory.evidence !== "string" || !finalStory.evidence.trim()
+        || !isValidTimestamp(finalStory.startedAt)
+        || !isValidTimestamp(finalStory.completedAt)
+        || finalStory.verification.observedAt < finalStory.startedAt
+        || finalStory.verification.observedAt > finalStory.completedAt) {
         throw new Error("complete goal plan lacks a successful final verification receipt")
       }
     }

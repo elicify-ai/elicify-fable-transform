@@ -3,7 +3,6 @@ import {
   classifyTask,
   contextForMode,
   formatDirectives,
-  type Directive,
 } from "../src/index.js"
 import { EvidenceLedger } from "../src/index.js"
 
@@ -28,7 +27,7 @@ describe("EvidenceLedger", () => {
   it("records a changed file but no verification → blocks", () => {
     const l = new EvidenceLedger()
     l.reset("s1", "deep")
-    l.recordChangedFiles("s1")
+    l.recordChangedFiles("s1", "src/index.ts")
     expect(l.hasChangedFiles("s1")).toBe(true)
     expect(l.hasVerification("s1")).toBe(false)
     expect(l.shouldBlockStop("s1")).toBe(true)
@@ -38,7 +37,7 @@ describe("EvidenceLedger", () => {
   it("records a successful verification → does not block", () => {
     const l = new EvidenceLedger()
     l.reset("s1")
-    l.recordChangedFiles("s1")
+    l.recordChangedFiles("s1", "src/index.ts")
     l.recordVerification("s1", "npm test", 0, true)
     expect(l.hasVerification("s1")).toBe(true)
     expect(l.shouldBlockStop("s1")).toBe(false)
@@ -47,7 +46,7 @@ describe("EvidenceLedger", () => {
   it("records a failed verification → still blocks (no success)", () => {
     const l = new EvidenceLedger()
     l.reset("s1", "deep")
-    l.recordChangedFiles("s1")
+    l.recordChangedFiles("s1", "src/index.ts")
     l.recordVerification("s1", "npm test", 1, false)
     expect(l.shouldBlockStop("s1")).toBe(true)
   })
@@ -72,20 +71,22 @@ describe("EvidenceLedger", () => {
     expect(l.getRepeatFailure("s1")).toBeNull()
   })
 
-  it("incrementStopBlocks is session-cumulative across resets", () => {
+  it("resets independent verification and promise block budgets on each prompt", () => {
     const l = new EvidenceLedger()
-    l.incrementStopBlocks("s1") // pre-existing count
-    l.reset("s1") // reset per-turn evidence but keep stopBlocks
-    expect(l.getStopBlocks("s1")).toBe(1)
-    l.incrementStopBlocks("s1")
     l.reset("s1")
-    expect(l.getStopBlocks("s1")).toBe(2)
+    l.incrementStopBlocks("s1")
+    l.incrementPromiseBlocks("s1")
+    expect(l.getStopBlocks("s1")).toBe(1)
+    expect(l.getPromiseBlocks("s1")).toBe(1)
+    l.reset("s1")
+    expect(l.getStopBlocks("s1")).toBe(0)
+    expect(l.getPromiseBlocks("s1")).toBe(0)
   })
 
   it("summary includes verified and failed counts", () => {
     const l = new EvidenceLedger()
     l.reset("s1")
-    l.recordChangedFiles("s1")
+    l.recordChangedFiles("s1", "src/index.ts")
     l.recordVerification("s1", "cmd1", 0, true)
     l.recordVerification("s1", "cmd2", 0, true)
     l.recordVerification("s1", "cmd3", 1, false)

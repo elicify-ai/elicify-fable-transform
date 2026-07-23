@@ -16,7 +16,6 @@ import {
   HOLDOUT_OFF_FRACTION,
   SUNSET_SESSIONS,
   appendEvent,
-  dataRoot,
   eventsPath,
   holdoutArm,
   holdoutSuppresses,

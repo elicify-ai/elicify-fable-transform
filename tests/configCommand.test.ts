@@ -17,6 +17,7 @@ describe("ElicifyVertexPlugin.config", () => {
     expect(input.command["elicify-vertex"].description).toEqual(expect.any(String))
     // Guard against the regression: `prompt` is NOT a valid field.
     expect(input.command["elicify-vertex"].prompt).toBeUndefined()
+    expect(input.command.vertex?.template).toEqual(expect.any(String))
   })
 
   it("does not overwrite a user-provided elicify-vertex command", async () => {
@@ -78,6 +79,30 @@ describe("ElicifyVertexPlugin.config", () => {
       "vertex_goal_status",
     ]))
   })
+
+  it("activates from the actual slash-command lifecycle and stays active for later messages", async () => {
+    const hooks = await ElicifyVertexPlugin({} as any, undefined)
+    const sessionID = "slash-session"
+    await hooks["command.execute.before"]!({
+      command: "vertex",
+      sessionID,
+      arguments: "verify this",
+    }, { parts: [] })
+    await hooks["chat.message"]!({ sessionID, agent: "build" } as any, {
+      message: {} as any,
+      parts: [{ type: "text", text: "Activate the elicify-vertex verification harness." } as any],
+    })
+
+    for (const text of ["first expanded command", "later ordinary message"]) {
+      await hooks["chat.message"]!({ sessionID, agent: "build" } as any, {
+        message: {} as any,
+        parts: [{ type: "text", text } as any],
+      })
+      const output = { system: [] as string[] }
+      await hooks["experimental.chat.system.transform"]!({ sessionID, model: {} as any }, output)
+      expect(output.system.join("\n")).toContain("vertex:contract")
+    }
+  })
 })
 
 describe("ElicifyVertexPlugin.chat.message activation gate", () => {
@@ -92,7 +117,7 @@ describe("ElicifyVertexPlugin.chat.message activation gate", () => {
       { sessionID, agent } as any,
       {
         message: {} as any,
-        parts: [{ type: "text", text }],
+        parts: [{ type: "text", text } as any],
       },
     )
     const fakeOutput: { system: string[] } = { system: [] }
@@ -111,6 +136,7 @@ describe("ElicifyVertexPlugin.chat.message activation gate", () => {
   it("activates when the user message STARTS with the trigger", async () => {
     const active = await gateActiveFor("s2", "build", "/elicify-vertex please verify")
     expect(active).toBe(true)
+    expect(await gateActiveFor("s2-alias", "build", "/vertex please verify")).toBe(true)
   })
 
   it("activates with leading whitespace before the trigger", async () => {

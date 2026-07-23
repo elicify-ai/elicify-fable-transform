@@ -62,6 +62,12 @@ describe("parseVerification — positive command allowlist", () => {
       expect(parseVerification(command, "success", 0).outcome).toBe("not-verification")
     }
   })
+
+  it("rejects arbitrary package scripts that are not verification-like", () => {
+    for (const command of ["npm run dev", "pnpm run start", "yarn run deploy", "bun run format"]) {
+      expect(parseVerification(command, "done", 0).outcome).toBe("not-verification")
+    }
+  })
 })
 
 describe("parseVerification — output and exit-code precedence", () => {
@@ -83,6 +89,20 @@ describe("parseVerification — output and exit-code precedence", () => {
     expect(result.outcome).toBe("verified")
     expect(result.failureDetected).toBe(false)
     expect(result.successDetected).toBe(true)
+  })
+
+  it("detects Python unittest failure summaries even when a wrapper reports exit zero", () => {
+    expect(parseVerification("python -m unittest", "FAILED (failures=1)", 0).outcome).toBe("failed")
+  })
+
+  it("does not treat expected error vocabulary inside passing test output as a failure", () => {
+    for (const output of [
+      "PASS tests/error.test.ts\n  ✓ returns error: fallback\n1 passed",
+      "PASS tests/traceback.test.ts\n1 passed",
+      "PASS tests/panic.test.ts\n  ✓ formats panic: fallback\n1 passed",
+    ]) {
+      expect(parseVerification("npm test", output, 0).outcome).toBe("verified")
+    }
   })
 
   it("accepts silent exit-zero tools such as tsc", () => {
@@ -113,6 +133,13 @@ describe("parseVerification — masked aggregate status", () => {
     const result = parseVerification("pytest || true", "", 0)
     expect(result.outcome).toBe("ambiguous")
     expect(result.exitCodeReliable).toBe(false)
+  })
+
+  it("does not accept a background verifier whose exit status is masked", () => {
+    expect(parseVerification("pytest & echo done", "done", 0)).toMatchObject({
+      outcome: "ambiguous",
+      exitCodeReliable: false,
+    })
   })
 
   it("does not accept a later semicolon command masking the verifier", () => {

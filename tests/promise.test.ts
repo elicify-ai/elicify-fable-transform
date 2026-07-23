@@ -221,11 +221,10 @@ describe("detectPromiseNoAct — multilingual annotations", () => {
 })
 
 describe("shouldBlockPromiseNoAct — completion state", () => {
-  it("blocks only when files changed and successful verification is absent", () => {
+  it("blocks promised remaining work after file changes even if an earlier verifier passed", () => {
     const text = "TODO: add the missing test later."
-    expect(shouldBlockPromiseNoAct(text, true, false)).toBe(true)
-    expect(shouldBlockPromiseNoAct(text, true, true)).toBe(false)
-    expect(shouldBlockPromiseNoAct(text, false, false)).toBe(false)
+    expect(shouldBlockPromiseNoAct(text, true)).toBe(true)
+    expect(shouldBlockPromiseNoAct(text, false)).toBe(false)
   })
 })
 

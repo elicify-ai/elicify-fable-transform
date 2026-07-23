@@ -17,6 +17,8 @@ describe("classifyFileKind — docs-only exemption", () => {
     expect(classifyFileKind("CHANGELOG.mdx")).toBe("docs")
     expect(classifyFileKind("notes.txt")).toBe("docs")
     expect(classifyFileKind("guide.rst")).toBe("docs")
+    expect(classifyFileKind("guide.adoc")).toBe("docs")
+    expect(classifyFileKind("docs/examples.json")).toBe("docs")
   })
 
   it("classifies doc basenames without extension as docs", () => {
@@ -25,6 +27,7 @@ describe("classifyFileKind — docs-only exemption", () => {
     expect(classifyFileKind("CHANGELOG")).toBe("docs")
     expect(classifyFileKind("CONTRIBUTING")).toBe("docs")
     expect(classifyFileKind("docs/CONTRIBUTING")).toBe("docs")
+    expect(classifyFileKind("AGENTS.md")).toBe("docs")
   })
 
   it("classifies source files as code", () => {

@@ -86,14 +86,6 @@ class DirectiveQueue {
     return q
   }
 
-  drainAll(): Array<Directive & { sessionID: string }> {
-    const out: Array<Directive & { sessionID: string }> = []
-    for (const [sessionID, q] of this.bySession) {
-      for (const d of q) out.push({ ...d, sessionID })
-      this.bySession.delete(sessionID)
-    }
-    return out
-  }
 }
 
 // ===========================================================================
@@ -114,6 +106,10 @@ class SessionGate {
   isActive(sessionID: string | undefined): boolean {
     return !!sessionID && this.active.has(sessionID)
   }
+
+  activeSessionIDs(): string[] {
+    return [...this.active]
+  }
 }
 
 // ===========================================================================
@@ -131,6 +127,7 @@ interface SessionLedger {
   verificationResults: Array<{ command: string; exitCode: number; success: boolean }>
   failures: Array<{ signature: string; timestamp: string }>
   stopBlocks: number
+  promiseBlocks: number
 }
 
 export class EvidenceLedger {
@@ -150,7 +147,8 @@ export class EvidenceLedger {
       verificationCommands: [],
       verificationResults: [],
       failures: [],
-      stopBlocks: this.ledgers.get(sessionID)?.stopBlocks ?? 0,
+      stopBlocks: 0,
+      promiseBlocks: 0,
     })
   }
 
@@ -214,6 +212,7 @@ export class EvidenceLedger {
         verificationResults: [],
         failures: [],
         stopBlocks: 0,
+        promiseBlocks: 0,
       }
       this.ledgers.set(sessionID, l)
     }
@@ -223,6 +222,17 @@ export class EvidenceLedger {
 
   getStopBlocks(sessionID: string): number {
     return this.ledgers.get(sessionID)?.stopBlocks ?? 0
+  }
+
+  incrementPromiseBlocks(sessionID: string): number {
+    const ledger = this.ledgers.get(sessionID)
+    if (!ledger) return 0
+    ledger.promiseBlocks += 1
+    return ledger.promiseBlocks
+  }
+
+  getPromiseBlocks(sessionID: string): number {
+    return this.ledgers.get(sessionID)?.promiseBlocks ?? 0
   }
 
   /** A compact summary for the model to see its own track record. */
@@ -275,14 +285,16 @@ export class EvidenceLedger {
 //   - other   : anything else
 // ----------------------------------------------------------------------------
 
-const DOC_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst"])
-const DOC_BASENAMES = new Set(["readme", "license", "changelog", "contributing", "code_of_conduct"])
+const DOC_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst", ".adoc"])
+const DOC_BASENAMES = new Set(["readme", "license", "changelog", "contributing", "code_of_conduct", "agents"])
 const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".pyi", ".go", ".rs", ".java", ".kt", ".scala", ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx", ".cs", ".rb", ".php", ".sh", ".bash", ".zsh"])
 const CONFIG_EXTENSIONS = new Set([".json", ".yaml", ".yml", ".toml", ".ini", ".env"])
 
 export function classifyFileKind(filePath: string): "docs" | "code" | "config" | "other" {
   if (!filePath) return "other"
   const lower = filePath.toLowerCase()
+  const pathParts = lower.split(/[\\/]+/)
+  if (pathParts.includes("docs")) return "docs"
   // Extract the basename (last path segment) to handle both "README.md" and
   // "README" (no extension) correctly.
   const slash = lower.lastIndexOf("/")
@@ -298,6 +310,35 @@ export function classifyFileKind(filePath: string): "docs" | "code" | "config" |
   if (CODE_EXTENSIONS.has(ext)) return "code"
   if (CONFIG_EXTENSIONS.has(ext)) return "config"
   return "other"
+}
+
+const MUTATING_BASH_RE = /\b(?:apply_patch|chmod|mkdir|mv|cp|rm|touch|install|ln|truncate|tee)\b|\b(?:sed\s+-i|perl\s+-pi)\b|\bgit\s+(?:checkout|restore|reset|clean|apply|am|merge|rebase|cherry-pick)\b|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b|(?:^|\s)--(?:write|fix)\b|(?:^|[\s;])\d?>>?\s*\S+/i
+
+function changedPathsFromTool(toolName: string, args: Record<string, unknown>): string[] {
+  const normalized = toolName.toLowerCase()
+  const directPath = typeof args.filePath === "string"
+    ? args.filePath
+    : typeof args.file_path === "string"
+      ? args.file_path
+      : ""
+  if (["edit", "write", "notebookedit", "multiedit"].includes(normalized)) {
+    return directPath ? [directPath] : ["edit-mutation"]
+  }
+  if (normalized === "apply_patch" || normalized === "patch") {
+    const patch = typeof args.patchText === "string"
+      ? args.patchText
+      : typeof args.patch === "string"
+        ? args.patch
+        : ""
+    const paths = [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)]
+      .map((match) => match[1].trim())
+    return paths.length > 0 ? paths : ["patch-mutation"]
+  }
+  if (normalized === "bash") {
+    const command = typeof args.command === "string" ? args.command : ""
+    if (MUTATING_BASH_RE.test(command)) return ["bash-mutation"]
+  }
+  return []
 }
 
 // ===========================================================================
@@ -442,8 +483,10 @@ export const PROMISE_NO_ACT_LABELS = PROMISE_NO_ACT_KEYWORDS.map((k) => k.label)
 
 /** Promise-no-act blocks only unfinished work: changed files, no successful
  * verification, and a deferral signal in the final assistant message. */
-export function shouldBlockPromiseNoAct(text: string, changed: boolean, verified: boolean): boolean {
-  return changed && !verified && detectPromiseNoAct(text).length > 0
+export function shouldBlockPromiseNoAct(text: string, changed: boolean): boolean {
+  // A promise to do remaining work is itself evidence that completion is not
+  // verified; an earlier successful command cannot verify work not yet done.
+  return changed && detectPromiseNoAct(text).length > 0
 }
 
 // ===========================================================================
@@ -593,7 +636,7 @@ Stop when you have actually looked, not after a fixed number of checks. One clea
 // (/tmp/fablize-deep/skills/fablize/SKILL.md:52-54). Vertex routes it as an
 // independent signal so review+render and review+debug tasks retain both modes.
 export function isReviewTask(text: string): boolean {
-  return /\b(?:review|audit|critique|inspect|assessment|code[- ]review|red[- ]team)\b|검토|리뷰|감사|점검/i.test(text || "")
+  return /\b(?:review|audit|critique|inspect|assess|assessment|evaluate|code[- ]review|red[- ]team|look\s+over|find\s+(?:security\s+)?(?:bugs?|defects?|issues?|flaws?|vulnerabilities?)|check\s+for\s+(?:security\s+)?(?:bugs?|defects?|issues?|flaws?|vulnerabilities?)|analy[sz]e\b[^.!?\n]{0,60}\bfor\s+(?:bugs?|defects?|issues?|flaws?|vulnerabilities?))\b|검토|리뷰|감사|점검/i.test(text || "")
 }
 
 export function contextForReview(): Directive {
@@ -631,11 +674,12 @@ Communicate in a calm, factual tone. Lead with the outcome. Avoid enthusiasm, ap
 const DIRECT_VERIFIER_RE = /^(?:pytest|unittest|vitest|jest|tsc|eslint|ruff|mypy|playwright|cypress|rspec|curl|build|check|validate|verify)(?:\s|$)/i
 const PYTHON_VERIFIER_RE = /^(?:python(?:3(?:\.\d+)?)?|py)\s+-m\s+(?:pytest|unittest|json\.tool|py_compile)(?:\s|$)/i
 const LANGUAGE_VERIFIER_RE = /^(?:go\s+test|cargo\s+(?:test|check|build)|mvnw?\s+test|gradlew?\s+test)(?:\s|$)/i
-const PACKAGE_VERIFIER_RE = /^(?:npm|pnpm|yarn|bun)\s+(?:test|run\s+[^\s;&|]+|lint|typecheck|build|check|validate|verify)(?:\s|$)/i
+const PACKAGE_VERIFIER_RE = /^(?:npm|pnpm|yarn|bun)\s+(?:test|lint|typecheck|build|check|validate|verify)(?:\s|$)/i
+const VERIFIER_SCRIPT_PARTS = new Set(["test", "tests", "lint", "typecheck", "build", "check", "validate", "verify", "verifier"])
 const EXEC_WRAPPER_RE = /^(?:npx|bunx|pnpm\s+(?:exec|dlx)|yarn\s+dlx)\s+((?:pytest|vitest|jest|tsc|eslint|ruff|mypy|playwright|cypress|rspec)(?:\s|$).*)/i
 const MAKE_VERIFIER_RE = /^(?:make|just|task)\s+(?:test|lint|typecheck|build|check|validate|verify)(?:\s|$)/i
 
-const FAILURE_PATTERN_RE = /command not found|no such file or directory|traceback|syntaxerror|\berror\s+TS\d+|\berror:|npm ERR!|ELIFECYCLE|\b[1-9]\d*\s+(?:tests?\s+)?failed\b|\b[1-9]\d*\s+errors?\b|\btests? failed\b|\b(?:build|lint|validation) failed\b|\bFAIL(?:ED)?\s+(?:tests?\/|[^\s]+\.(?:test|spec)\.)|exit(?:ed)? (?:with )?(?:code|status) -?[1-9]\d*|segfault|panic:|aborted|killed by|signal [1-9]\d*/i
+const FAILURE_PATTERN_RE = /command not found|no such file or directory|(?:^|\n)\s*(?:traceback(?:\s+\(most recent call last\))?|syntaxerror\b|panic:|segmentation fault|segfault\b|aborted\b|killed by\b|signal [1-9]\d*)|\berror\s+TS\d+|^\s*error:|npm ERR!|ELIFECYCLE|\b[1-9]\d*\s+(?:tests?\s+)?failed\b|\b[1-9]\d*\s+errors?\b|\btests? failed\b|\b(?:build|lint|validation) failed\b|\bFAIL(?:ED)?\s+(?:tests?\/|[^\s]+\.(?:test|spec)\.)|\bFAILED\s*(?:\(|$)|\bfailures?\s*=\s*[1-9]\d*|exit(?:ed)? (?:with )?(?:code|status) -?[1-9]\d*/im
 const SUCCESS_PATTERN_RE = /\b(?:[1-9]\d*\s+passed|0 failed|0 errors|success|succeeded|build completed|validation passed|tests? passed)\b|^ok\s/im
 
 export type VerificationOutcome = "verified" | "failed" | "ambiguous" | "not-verification"
@@ -668,6 +712,10 @@ function matchVerificationSegment(segment: string): string | null {
   const value = unwrapShellCommand(segment)
   const wrapper = value.match(EXEC_WRAPPER_RE)
   const candidate = wrapper ? wrapper[1] : value
+  const packageRun = candidate.match(/^(?:npm|pnpm|yarn|bun)\s+run\s+([^\s;&|]+)/i)
+  if (packageRun && packageRun[1].toLowerCase().split(/[-_:]/).some((part) => VERIFIER_SCRIPT_PARTS.has(part))) {
+    return packageRun[0]
+  }
   const match = candidate.match(DIRECT_VERIFIER_RE)
     ?? candidate.match(PYTHON_VERIFIER_RE)
     ?? candidate.match(LANGUAGE_VERIFIER_RE)
@@ -697,7 +745,7 @@ function unwrapTopLevelShellCommand(command: string): string {
 }
 
 function hasReliableAggregateExit(command: string, segments: string[], verifierIndexes: number[]): boolean {
-  if (/\|\||(?<!\|)\|(?!\|)/.test(command)) return false
+  if (/\|\||(?<!\|)\|(?!\|)|(?<!&)&(?!&)/.test(command)) return false
   if (verifierIndexes.length === 0) return false
   const lastVerifier = verifierIndexes[verifierIndexes.length - 1]
   if (lastVerifier === segments.length - 1) return true
@@ -791,6 +839,9 @@ export const ElicifyVertexPlugin = async (
   const taskModeBySession = new Map<string, TaskMode>()
   const stopModeBySession = new Map<string, StopModeResult>()
   const reviewBySession = new Map<string, boolean>()
+  const commandActivatedSessions = new Set<string>()
+  const gateContinuationSessions = new Set<string>()
+  const compactingSessions = new Set<string>()
 
   // Last assistant text per session (for the promise-no-act guard).
   // Populated by experimental.chat.messages.transform; read by event(session.idle).
@@ -890,6 +941,12 @@ Then proceed with the user's request under the vertex verification discipline:
 verify before claiming done, control things manually, communicate calmly.`,
         }
       }
+      if (!cfgInput.command.vertex) {
+        cfgInput.command.vertex = {
+          description: "Activate elicify-vertex verification harness for this session.",
+          template: "Activate the elicify-vertex verification harness, then continue with the user's request under its verification discipline.",
+        }
+      }
       const goalCommands: Record<string, { description: string; template: string }> = {
         "vertex-goal-create": {
           description: "Create a persisted multi-story goal plan.",
@@ -913,22 +970,38 @@ verify before claiming done, control things manually, communicate calmly.`,
       }
     },
 
+    async "command.execute.before"(commandInput) {
+      if (commandInput.command === "elicify-vertex" || commandInput.command === "vertex") {
+        commandActivatedSessions.add(commandInput.sessionID)
+        gate.activate(commandInput.sessionID)
+        debug(`command.execute.before: ACTIVATED session ${commandInput.sessionID}`)
+      }
+    },
+
     // ── CHAT.MESSAGE: session gate + ledger reset + task classification ────
     async "chat.message"(msgInput, output) {
       try {
+        lastAssistantText.delete(msgInput.sessionID)
+        compactingSessions.delete(msgInput.sessionID)
+        const gateContinuation = gateContinuationSessions.delete(msgInput.sessionID)
         const agent = msgInput.agent
         const text = (output.parts || [])
           .filter((p) => p && p.type === "text" && typeof (p as any).text === "string")
           .map((p) => (p as any).text)
           .join("\n")
 
-        const triggerRe = new RegExp(
-          `^\\s*${opts.activeSkillTrigger.replace(/[.*+?^${}()|[\]\\\\]/g, "\\\\$&")}\\b`,
-          "m",
-        )
+        const triggerAlternatives = [...new Set([opts.activeSkillTrigger, "/vertex"])]
+          .map((trigger) => trigger.replace(/[.*+?^${}()|[\]\\\\]/g, "\\\\$&"))
+          .join("|")
+        const triggerRe = new RegExp(`^\\s*(?:${triggerAlternatives})\\b`, "m")
 
-        if (agent === opts.activeAgent || triggerRe.test(text)) {
+        const activatedByCommand = commandActivatedSessions.has(msgInput.sessionID)
+        if (agent === opts.activeAgent || triggerRe.test(text) || activatedByCommand || gateContinuation) {
           gate.activate(msgInput.sessionID)
+          if (gateContinuation) {
+            debug(`chat.message: CONTINUATION session ${msgInput.sessionID} (ledger preserved)`)
+            return
+          }
           const sigMode = classifyStopMode(text)
           ledger.reset(msgInput.sessionID, sigMode.mode, sigMode.risks)
           stopModeBySession.set(msgInput.sessionID, sigMode)
@@ -972,6 +1045,9 @@ verify before claiming done, control things manually, communicate calmly.`,
       try {
         const command = toolName === "bash" && typeof args.command === "string" ? args.command : ""
         const verification = toolName === "bash" ? parseVerification(command, out, exitCode) : null
+        const changedPaths = changedPathsFromTool(toolName, args)
+
+        if (changedPaths.length > 0) verificationReceipts.invalidate(sid)
 
         // Goal receipts work independently of the session directive gate: the
         // config-hook goal commands can be used from any primary agent.
@@ -995,11 +1071,10 @@ verify before claiming done, control things manually, communicate calmly.`,
 
         if (!gate.isActive(sid)) return
 
-        // ── Edit/Write: record file changes ──────────────────────────────
-        if (toolName === "edit" || toolName === "write") {
-          const fp = typeof args.filePath === "string" ? args.filePath : ""
-          ledger.recordChangedFiles(sid, fp)
-          debug(`tool.after: ${toolName} on ${fp || "?"} → file changed recorded for ${sid}`)
+        // ── Mutations: record direct edits, patches, and mutating shell calls ──
+        for (const filePath of changedPaths) {
+          ledger.recordChangedFiles(sid, filePath)
+          debug(`tool.after: ${toolName} on ${filePath} → file changed recorded for ${sid}`)
         }
 
         // ── Bash: record verification or failure (strictly better than fablize) ──
@@ -1078,7 +1153,7 @@ verify before claiming done, control things manually, communicate calmly.`,
       }
 
       // Queued directives (from tool.after failures, stop gate, etc.)
-      const queued = queue.drain(sid)
+      const queued = compactingSessions.has(sid) ? [] : queue.drain(sid)
       combined.push(...queued)
 
       const block = formatDirectives(combined)
@@ -1087,49 +1162,57 @@ verify before claiming done, control things manually, communicate calmly.`,
       debug(`system.transform: INJECTED ${combined.length} directive(s) into ${sid} (mode=${mode || "none"}, queued=${queued.length})`)
     },
 
-    // ── MESSAGES.TRANSFORM: fallback + capture last assistant text ────────
+    // ── MESSAGES.TRANSFORM: session-isolated fallback injection ──────────
     ...(opts.wireMessagesTransform
       ? {
           async "experimental.chat.messages.transform"(_msgInput, msgOutput) {
-            // Capture last assistant text per session for the promise-no-act
-            // guard. Mirrors fablize finish-the-work.sh:15-30 which reads the
-            // transcript to find the last assistant message text.
-            try {
-              for (const m of msgOutput.messages || []) {
-                const info = (m as any).info
-                if (info?.role === "assistant") {
-                  const text = ((m as any).parts || [])
-                    .filter((p: any) => p && p.type === "text" && typeof p.text === "string")
-                    .map((p: any) => p.text)
-                    .join("\n")
-                  if (text) lastAssistantText.set(info.sessionID, text)
-                }
+            const sessionIDs = new Set(msgOutput.messages.map((message) => message.info.sessionID))
+            for (const sessionID of sessionIDs) {
+              if (!gate.isActive(sessionID) || compactingSessions.has(sessionID)) continue
+              const directives = queue.drain(sessionID)
+              const block = formatDirectives(directives)
+              if (!block) continue
+              const target = [...msgOutput.messages].reverse().find((message) => message.info.sessionID === sessionID)
+              if (!target) continue
+              const part: TextPart = {
+                id: `prt_${randomUUID().replace(/-/g, "")}`,
+                type: "text",
+                text: `\n\n${block}\n`,
+                synthetic: true,
+                sessionID,
+                messageID: target.info.id,
               }
-            } catch {}
-
-            const undrained = queue.drainAll()
-            const active = undrained.filter((d) => gate.isActive(d.sessionID))
-            if (active.length === 0) return
-            const block = formatDirectives(active)
-            if (!block) return
-            const last = msgOutput.messages[msgOutput.messages.length - 1]
-            if (!last) return
-            const part: TextPart = {
-              id: `prt_${randomUUID().replace(/-/g, "")}`,
-              type: "text",
-              text: `\n\n${block}\n`,
-              synthetic: true,
-              sessionID: last.info.sessionID,
-              messageID: last.info.id,
+              target.parts.push(part)
             }
-            last.parts.push(part)
           },
         }
       : {}),
 
+    async "experimental.text.complete"(textInput, textOutput) {
+      if (gate.isActive(textInput.sessionID) && textOutput.text.trim()) {
+        lastAssistantText.set(textInput.sessionID, textOutput.text)
+      }
+    },
+
+    async "experimental.session.compacting"(compactionInput) {
+      compactingSessions.add(compactionInput.sessionID)
+    },
+
     // ── EVENT: the STOP GATE ──────────────────────────────────────────────
     async event({ event }) {
       try {
+        if (event.type === "session.compacted") {
+          compactingSessions.delete(event.properties.sessionID)
+          return
+        }
+        if (event.type === "file.edited") {
+          for (const sessionID of goalRootsBySession.keys()) verificationReceipts.invalidate(sessionID)
+          const activeSessions = gate.activeSessionIDs()
+          if (activeSessions.length === 1) {
+            ledger.recordChangedFiles(activeSessions[0], event.properties.file)
+          }
+          return
+        }
         if (event.type !== "session.idle") return
         const sid = event.properties?.sessionID
         if (typeof sid !== "string") return
@@ -1144,7 +1227,7 @@ verify before claiming done, control things manually, communicate calmly.`,
         const lastText = lastAssistantText.get(sid)
         if (lastText) {
           const hits = detectPromiseNoAct(lastText)
-          if (shouldBlockPromiseNoAct(lastText, ledger.hasChangedFiles(sid), ledger.hasVerification(sid))) {
+          if (shouldBlockPromiseNoAct(lastText, ledger.hasChangedFiles(sid))) {
             const labels = hits.map((h) => h.label).join(", ")
             const reason = `[vertex:promise-no-act] Your last message contains deferral/intent language (${labels}) but files were changed this turn. Either complete the work now or explicitly state what remains unverified. Promise without act is not allowed when files are changed.`
             debug(`event: ${sid} — PROMISE-NO-ACT (${labels})`)
@@ -1156,13 +1239,13 @@ verify before claiming done, control things manually, communicate calmly.`,
                 decision: "allow",
                 changed: true,
                 verified: ledger.hasVerification(sid),
-                stop_blocks: ledger.getStopBlocks(sid),
+                stop_blocks: ledger.getPromiseBlocks(sid),
                 max_stop_blocks: opts.maxStopBlocks,
                 would_block: true,
               })
               debug(`event: ${sid} — HOLDOUT, promise-no-act suppressed`)
             } else {
-              const count = ledger.incrementStopBlocks(sid)
+              const count = ledger.incrementPromiseBlocks(sid)
               const cap = opts.maxStopBlocks
               if (count > cap) {
                 // Past cap — log and let it through with a warning
@@ -1191,10 +1274,15 @@ verify before claiming done, control things manually, communicate calmly.`,
               })
               debug(`event: ${sid} — PROMISE-NO-ACT BLOCK ${count}/${cap}`)
               if (client?.session?.prompt) {
-                await client.session.prompt({
-                  path: { id: sid },
-                  body: { parts: [{ type: "text", text: reason }] },
-                })
+                gateContinuationSessions.add(sid)
+                try {
+                  await client.session.prompt({
+                    path: { id: sid },
+                    body: { parts: [{ type: "text", text: reason }] },
+                  })
+                } finally {
+                  gateContinuationSessions.delete(sid)
+                }
               }
               return
             }
@@ -1269,12 +1357,17 @@ verify before claiming done, control things manually, communicate calmly.`,
 
         // Re-prompt the model to continue
         if (client?.session?.prompt) {
-          await client.session.prompt({
-            path: { id: sid },
-            body: {
-              parts: [{ type: "text", text: reason }],
-            },
-          })
+          gateContinuationSessions.add(sid)
+          try {
+            await client.session.prompt({
+              path: { id: sid },
+              body: {
+                parts: [{ type: "text", text: reason }],
+              },
+            })
+          } finally {
+            gateContinuationSessions.delete(sid)
+          }
         }
       } catch (e) {
         debug(`event: error — ${(e as Error).message}`)
