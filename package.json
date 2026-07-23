@@ -1,7 +1,7 @@
 {
   "name": "@elicify-ai/elicify-vertex",
-  "version": "0.8.0",
-  "description": "Opencode plugin that injects harness directives into the LLM input via the official chat.transform hooks \u2014 verification, evidence, and communication discipline as procedure, not luck.",
+  "version": "0.9.0",
+  "description": "Opencode plugin that injects harness directives into the LLM input via the official chat.transform hooks — verification, evidence, and communication discipline as procedure, not luck.",
   "type": "module",
   "main": "./dist/plugin.cjs",
   "module": "./dist/plugin.js",
