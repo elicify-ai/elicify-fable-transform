@@ -144,8 +144,9 @@ export function appendEvent(event: MeasurementEvent, path?: string): string {
     const safeEvent = redactForDisk(event)
     appendFileSync(p, JSON.stringify(safeEvent) + "\n", { encoding: "utf8", mode: 0o600 })
     chmodSync(p, 0o600)
-  } catch {
-    // out-of-band: swallow — never let measurement break the plugin
+  } catch (err) {
+    // Fail-open for the plugin hot path, but never silent to the operator.
+    console.error("[vertex] measurement appendEvent", p, err)
   }
   return p
 }

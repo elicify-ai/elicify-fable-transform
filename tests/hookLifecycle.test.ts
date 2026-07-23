@@ -377,3 +377,115 @@ describe("system-transform directive delivery (H5)", () => {
     expect(resumed.system.join("\n")).toContain("after-failed-compaction")
   })
 })
+
+describe("post-verify mutation freshness", () => {
+  it("blocks deep stop after verify-then-edit (ledger matches receipt invalidation)", async () => {
+    const prompt = vi.fn(async () => ({}))
+    const hooks = await ElicifyVertexPlugin(pluginInput(prompt), { maxStopBlocks: 3 })
+    const sessionID = "verify-then-edit"
+    await activate(hooks, sessionID, "deep implement the plan")
+    await hooks["tool.execute.after"]!({
+      tool: "bash",
+      sessionID,
+      callID: "v1",
+      args: { command: "npm test" },
+    }, { title: "t", output: "10 passed", metadata: { exit: 0 } })
+    await hooks["tool.execute.after"]!({
+      tool: "edit",
+      sessionID,
+      callID: "e1",
+      args: { filePath: "src/index.ts" },
+    }, { title: "e", output: "ok", metadata: {} })
+    await completeText(hooks, sessionID, "Done.")
+    await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any })
+    expect(prompt).toHaveBeenCalled()
+    const request = (prompt.mock.calls as unknown as Array<[any]>)[0]?.[0]
+    expect(String(request?.body?.parts?.[0]?.text ?? "")).toContain("vertex:stop-block")
+  })
+
+  it("allows deep stop when edit-then-verify", async () => {
+    const prompt = vi.fn(async () => ({}))
+    const hooks = await ElicifyVertexPlugin(pluginInput(prompt), undefined)
+    const sessionID = "edit-then-verify"
+    await activate(hooks, sessionID, "deep implement the plan")
+    await hooks["tool.execute.after"]!({
+      tool: "edit",
+      sessionID,
+      callID: "e1",
+      args: { filePath: "src/index.ts" },
+    }, { title: "e", output: "ok", metadata: {} })
+    await hooks["tool.execute.after"]!({
+      tool: "bash",
+      sessionID,
+      callID: "v1",
+      args: { command: "npm test" },
+    }, { title: "t", output: "10 passed", metadata: { exit: 0 } })
+    await completeText(hooks, sessionID, "Done.")
+    await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any })
+    expect(prompt).not.toHaveBeenCalled()
+  })
+})
+
+describe("cap warn and holdout idle", () => {
+  it("warns and stops re-prompting after maxStopBlocks", async () => {
+    const prompt = vi.fn(async () => ({}))
+    const fires: Array<Record<string, unknown>> = []
+    const spy = vi.spyOn(measurement, "logGateFire").mockImplementation((_sid, payload) => {
+      fires.push(payload as Record<string, unknown>)
+    })
+    try {
+      const hooks = await ElicifyVertexPlugin(pluginInput(prompt), { maxStopBlocks: 1 })
+      const sessionID = "cap-warn"
+      await activate(hooks, sessionID, "deep implement the plan")
+      await hooks["tool.execute.after"]!({
+        tool: "edit",
+        sessionID,
+        callID: "e",
+        args: { filePath: "src/a.ts" },
+      }, { title: "e", output: "ok", metadata: {} })
+      await completeText(hooks, sessionID, "Done.")
+      await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any })
+      expect(prompt).toHaveBeenCalledTimes(1)
+      await completeText(hooks, sessionID, "Still done.")
+      await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any })
+      expect(prompt).toHaveBeenCalledTimes(1)
+      expect(fires.some((f) => f.decision === "warn")).toBe(true)
+      const sys = { system: [] as string[] }
+      await hooks["experimental.chat.system.transform"]!({ sessionID, model: {} as any }, sys)
+      expect(sys.system.join("\n")).toMatch(/stop-warning/)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("suppresses stop gate under holdout off-arm without claiming block", async () => {
+    const prompt = vi.fn(async () => ({}))
+    const off = Array.from({ length: 5000 }, (_, i) => `holdout-${i}`).find(
+      (s) => measurement.holdoutArm(s) === "off",
+    )!
+    const prev = process.env.VERTEX_HOLDOUT
+    process.env.VERTEX_HOLDOUT = "1"
+    const fires: Array<Record<string, unknown>> = []
+    const spy = vi.spyOn(measurement, "logGateFire").mockImplementation((_sid, payload) => {
+      fires.push(payload as Record<string, unknown>)
+    })
+    try {
+      const hooks = await ElicifyVertexPlugin(pluginInput(prompt), undefined)
+      await activate(hooks, off, "deep implement the plan")
+      await hooks["tool.execute.after"]!({
+        tool: "edit",
+        sessionID: off,
+        callID: "e",
+        args: { filePath: "src/a.ts" },
+      }, { title: "e", output: "ok", metadata: {} })
+      await completeText(hooks, off, "Done.")
+      await hooks.event!({ event: { type: "session.idle", properties: { sessionID: off } } as any })
+      expect(prompt).not.toHaveBeenCalled()
+      expect(fires.some((f) => f.decision === "allow" && f.would_block === true)).toBe(true)
+    } finally {
+      spy.mockRestore()
+      if (prev === undefined) delete process.env.VERTEX_HOLDOUT
+      else process.env.VERTEX_HOLDOUT = prev
+    }
+  })
+})

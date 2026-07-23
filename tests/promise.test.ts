@@ -259,6 +259,11 @@ describe("shouldBlockPromiseNoAct — completion state", () => {
       ),
     ).toBe(false)
   })
+
+  it("does not treat bare trailing OK? as an ask-user exemption", () => {
+    expect(shouldBlockPromiseNoAct("TODO remaining.\nOK?", true, false)).toBe(true)
+    expect(shouldBlockPromiseNoAct("I will implement the cache next.\nReady?", true, false)).toBe(true)
+  })
 })
 
 describe("detectPromiseNoAct — comprehensive coverage", () => {

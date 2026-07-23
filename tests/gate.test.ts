@@ -36,11 +36,22 @@ describe("EvidenceLedger", () => {
 
   it("records a successful verification → does not block", () => {
     const l = new EvidenceLedger()
-    l.reset("s1")
+    l.reset("s1", "deep")
     l.recordChangedFiles("s1", "src/index.ts")
     l.recordVerification("s1", "npm test", 0, true)
     expect(l.hasVerification("s1")).toBe(true)
     expect(l.shouldBlockStop("s1")).toBe(false)
+  })
+
+  it("invalidates prior successful verification when files change again", () => {
+    const l = new EvidenceLedger()
+    l.reset("s1", "deep")
+    l.recordChangedFiles("s1", "src/index.ts")
+    l.recordVerification("s1", "npm test", 0, true)
+    expect(l.shouldBlockStop("s1")).toBe(false)
+    l.recordChangedFiles("s1", "src/index.ts")
+    expect(l.hasVerification("s1")).toBe(false)
+    expect(l.shouldBlockStop("s1")).toBe(true)
   })
 
   it("records a failed verification → still blocks (no success)", () => {

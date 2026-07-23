@@ -120,6 +120,33 @@ describe("MultiStoryGoalEngine", () => {
     expect(() => engine.checkpoint(finalStory.id, "complete", "proof", wrongRoot)).toThrow(/different workspace/i)
   })
 
+  it("rejects receipts that predate the final story or arrive in the future", () => {
+    const root = temporaryRoot()
+    const engine = new MultiStoryGoalEngine(root, tickingClock())
+    engine.create("brief", [{ title: "one", objective: "work" }])
+    engine.next()
+    engine.checkpoint("G001", "complete", "implementation observed")
+    const finalPlan = engine.next()
+    const startedAt = finalPlan.stories.at(-1)!.startedAt!
+    const predated: VerificationReceipt = {
+      id: "vrf_old",
+      sessionID: "s1",
+      workspaceRoot: root,
+      command: "npm test",
+      exitCode: 0,
+      outcome: "verified",
+      outputSummary: "ok",
+      observedAt: new Date(Date.parse(startedAt) - 1000).toISOString(),
+    }
+    expect(() => engine.checkpoint(finalPlan.activeStoryId!, "complete", "stale", predated)).toThrow(/predates/i)
+    const future: VerificationReceipt = {
+      ...predated,
+      id: "vrf_future",
+      observedAt: new Date(Date.parse(startedAt) + 86_400_000).toISOString(),
+    }
+    expect(() => engine.checkpoint(finalPlan.activeStoryId!, "complete", "future", future)).toThrow(/future/i)
+  })
+
   it("persists a complete plan only after every story and a successful final receipt", () => {
     const root = temporaryRoot()
     const engine = new MultiStoryGoalEngine(root, tickingClock())

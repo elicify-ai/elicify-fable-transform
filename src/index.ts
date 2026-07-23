@@ -146,6 +146,9 @@ export class EvidenceLedger {
     if (!l) return
     l.changedFilesSeen = true
     l.changedFileKinds.add(classifyFileKind(filePath))
+    // Post-mutation evidence is stale: a prior green verifier does not cover
+    // edits that land after it. Mirror receipt invalidation for the stop gate.
+    l.verificationResults = l.verificationResults.filter((v) => !v.success)
   }
 
   recordVerification(sessionID: string, command: string, exitCode: number, success: boolean): void {
@@ -232,19 +235,19 @@ export class EvidenceLedger {
     return parts.join(" · ")
   }
 
-  /** Should the stop gate block? Files changed but no verification observed.
-   * Mirrors fablize verify_state.should_block_stop:18-49 — deep-only with
-   * docs-only exemption, plus our stricter quick-mode bypass.
+  /** Should the stop gate block? Deep mode, non-docs changes, no successful
+   * verification after the latest mutation. Policy mirrors fablize
+   * verify_state.should_block_stop (verify_state.py:30-49): quick/normal never
+   * hard-block; docs-only exempt; deep+changed+unverified blocks.
    */
   shouldBlockStop(sessionID: string): boolean {
     const l = this.ledgers.get(sessionID)
     if (!l) return false
-    // quick and normal never hard-block. Fablize made normal advisory-only after
-    // measuring excessive noise (verify_state.py:38-49).
+    // quick and normal never hard-block (verify_state.py:38-39,48-49).
     if (l.taskMode !== "deep") return false
-    // docs-only → never block (mirrors fablize line 30)
+    // docs-only → never block (verify_state.py:40-41 via docs_only).
     if (l.changedFileKinds.size > 0 && [...l.changedFileKinds].every((k) => k === "docs")) return false
-    // deep AND changed AND not verified → block (mirrors fablize line 42)
+    // deep AND changed AND not verified → block (verify_state.py:46).
     return l.changedFilesSeen && !l.verificationResults.some((v) => v.success)
   }
 
@@ -511,8 +514,9 @@ export function detectPromiseNoAct(text: string): PromiseHit[] {
  * user a question or offering a choice rather than promising unfinished work.
  */
 function asksUser(text: string): boolean {
+  // Phrase-based only. Bare "?" (e.g. "TODO remaining. OK?") must not disable the gate.
   const tail = text.slice(-600).toLowerCase()
-  return /\?|shall i\b|would you like\b|do you want\b|let me know\b|which option\b/i.test(tail)
+  return /\b(?:shall i|should i|would you like|do you want|let me know|which option)\b/i.test(tail)
 }
 
 /**
@@ -564,13 +568,11 @@ export function classifyTask(text: string): TaskMode {
 // ===========================================================================
 // STOP-MODE CLASSIFIER — used by the stop gate to decide enforcement strictness
 // ===========================================================================
-// Mirrors fablize scripts/gate/classify_task.py:14-26,29-48.
-// Three modes drive the stop gate:
-//   - quick  : no block, ever (fablize line 24)
-//   - normal : advisory only — we nudge via system.transform but don't block
-//   - deep   : hard block if changed + unverified (fablize line 42)
-// We are STRICTLY BETTER: we also do risk-flag detection (production,
-// database, secret, remote-write) and inject advisories per risk.
+// Mode classification mirrors fablize classify_task.py:14-48.
+// Stop hard-block policy lives in EvidenceLedger.shouldBlockStop /
+// verify_state.py:30-49 (not in these line numbers).
+// Risk flags also exist in fablize; Vertex promotes any risk (including
+// secret-or-auth) to deep and injects mode advisories via system.transform.
 // ----------------------------------------------------------------------------
 
 export type StopMode = "quick" | "normal" | "deep"
@@ -718,7 +720,7 @@ Automated tests often do not surface real issues. Before claiming something work
 Communicate in a calm, factual tone. Lead with the outcome. Avoid enthusiasm, apology, or performative framing.`
 
 // ===========================================================================
-// PRECISE VERIFICATION PARSING — strictly better than fablize parse_tool_result.py
+// PRECISE VERIFICATION PARSING — tighter than fablize parse_tool_result.py
 // ===========================================================================
 // Fablize searches for a verifier name anywhere in the command, so text-only
 // commands such as `echo pytest` can be misclassified (parse_tool_result.py:16-23,
@@ -1195,7 +1197,7 @@ verify before claiming done, control things manually, communicate calmly.`,
           debug(`tool.after: ${toolName} on ${filePath} → file changed recorded for ${sid}`)
         }
 
-        // ── Bash: record verification or failure (strictly better than fablize) ──
+        // ── Bash: record verification or failure (positive allowlist + patterns) ──
         if (toolName === "bash" && verification) {
           if (verification.isVerificationCommand) {
             // Count only a reliable exit 0 with no contradictory failure
