@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>From fablize to elicify-fable-transform — how the harness steers the model</title>
+  <script src="mermaid.min.js"></script>
+  <script>
+    // Self-contained: Mermaid is vendored locally (mermaid.min.js) so the
+    // document works without internet. Mermaid 10.9.1, MIT.
+    (function () {
+      const ready = (fn) =>
+        document.readyState === "loading"
+          ? document.addEventListener("DOMContentLoaded", fn)
+          : fn();
+      ready(async () => {
+        if (typeof mermaid === "undefined") {
+          document
+            .querySelectorAll(".mermaid")
+            .forEach((el) => (el.textContent = "[Mermaid failed to load — see source below]\n\n" + el.textContent));
+          return;
+        }
+        try {
+          mermaid.initialize({
+            startOnLoad: false,
+            theme: "default",
+            securityLevel: "loose",
+            flowchart: { useMaxWidth: true, htmlLabels: true },
+            sequence: { useMaxWidth: true, showSequenceNumbers: true },
+          });
+          await mermaid.run({ querySelector: ".mermaid" });
+        } catch (err) {
+          console.error("Mermaid render failed:", err);
+          document
+            .querySelectorAll(".mermaid")
+            .forEach((el) => (el.textContent = "[Mermaid render failed]\n\n" + el.textContent));
+        }
+      });
+    })();
+  </script>
+  <noscript>
+    <style>
+      .mermaid { display: block; white-space: pre; font-family: ui-monospace, monospace; font-size: 12px; background: #f4f4ed; padding: 16px; border: 1px solid #e3e3dc; }
+    </style>
+  </noscript>
+  <style>
+    :root {
+      --bg: #fafaf7;
+      --fg: #1a1a1a;
+      --muted: #5a5a5a;
+      --line: #e3e3dc;
+      --claude: #d97706;
+      --opencode: #2563eb;
+      --card: #ffffff;
+      --code-bg: #f4f4ed;
+      --callout: #fff7ed;
+      --callout-line: #fb923c;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+    body {
+      font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 48px 32px 96px;
+    }
+    h1 { font-size: 38px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.02em; }
+    h2 { font-size: 26px; margin: 56px 0 16px; padding-top: 24px; border-top: 1px solid var(--line); letter-spacing: -0.01em; }
+    h3 { font-size: 19px; margin: 32px 0 8px; }
+    p { margin: 0 0 14px; }
+    .lede { font-size: 18px; color: var(--muted); max-width: 60ch; }
+    .tag { display: inline-block; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; font-weight: 600; vertical-align: 2px; }
+    .tag-claude { background: #fde68a; color: #92400e; }
+    .tag-opencode { background: #bfdbfe; color: #1e40af; }
+    .meta { color: var(--muted); font-size: 14px; margin: 0 0 32px; }
+    .grid { display: grid; gap: 20px; }
+    .grid-2 { grid-template-columns: 1fr 1fr; }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 760px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+    .card-claude { border-left: 4px solid var(--claude); }
+    .card-opencode { border-left: 4px solid var(--opencode); }
+    .card h3 { margin-top: 0; }
+    code, pre { font: 13px/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+    code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+    pre { background: var(--code-bg); padding: 16px; border-radius: 8px; overflow-x: auto; border: 1px solid var(--line); }
+    pre code { background: transparent; padding: 0; }
+    .mermaid { background: #ffffff; border: 1px solid var(--line); border-radius: 12px; padding: 24px; margin: 16px 0 24px; overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0 24px; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { background: var(--code-bg); font-weight: 600; }
+    .callout { background: var(--callout); border-left: 4px solid var(--callout-line); padding: 14px 18px; border-radius: 6px; margin: 16px 0; }
+    .callout strong { color: #9a3412; }
+    .flow { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px; }
+    .flow .claude { color: var(--claude); font-weight: 600; }
+    .flow .opencode { color: var(--opencode); font-weight: 600; }
+    ul, ol { padding-left: 22px; }
+    li { margin: 4px 0; }
+    .footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 64px; padding-top: 24px; }
+  </style>
+</head>
+<body>
+
+  <h1>From <span class="tag tag-claude">fablize</span> to <span class="tag tag-opencode">elicify-fable-transform</span></h1>
+  <p class="lede">A side-by-side walkthrough of how each harness injects instructions into the model, what triggers the injection, and what makes the model actually behave like Fable.</p>
+  <p class="meta">Plain English. Mermaid diagrams. The original Claude plugin on the left, the new opencode plugin on the right.</p>
+
+  <!-- =========================================================== -->
+  <h2>1. The 30-second version</h2>
+
+  <div class="grid grid-2">
+    <div class="card card-claude">
+      <h3>Original Claude plugin <span class="tag tag-claude">fablize</span></h3>
+      <p>A Claude Code plugin that runs shell/Python <strong>hooks</strong> on three Claude events: every user prompt, every tool call, and when the LLM tries to stop. The hooks write a small JSON blob that Claude's runtime injects as a <code>user</code> or <code>system</code> message on the model's next turn.</p>
+    </div>
+    <div class="card card-opencode">
+      <h3>New opencode plugin <span class="tag tag-opencode">elicify-fable-transform</span></h3>
+      <p>An opencode plugin that wires two <strong>transform hooks</strong> on the LLM call: <code>experimental.chat.system.transform</code> (per-session, recommended) and <code>experimental.chat.messages.transform</code> (global, fallback). Other code calls <code>enqueue(sessionID, directive)</code> to schedule a directive for the next LLM turn.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>Same goal, different mechanic.</strong> Both harnesses try to put a "verification reminder / stop-block reason" into the model's input on the next turn. The Claude plugin does it by stamping a tool's output (with a flag Claude reads as <code>additionalContext</code>). The opencode plugin does it by appending a tagged block to the system prompt at LLM-call time.
+  </div>
+
+  <!-- =========================================================== -->
+  <h2>2. File layout</h2>
+
+  <h3><span class="tag tag-claude">fablize</span> (Claude plugin)</h3>
+  <pre><code>fablize/
+├── .claude-plugin/
+│   └── plugin.json            ← plugin manifest
+├── hooks/
+│   ├── hooks.json             ← wires the 3 Claude events to scripts
+│   ├── router.sh              ← classifies the prompt (per-task mode)
+│   ├── gate_prompt.py         ← writes "always-on" contract block
+│   ├── gate_post_tool.py      ← records evidence; flags silent recovery
+│   ├── gate_stop.py           ← blocks completion if no verification
+│   └── finish-the-work.sh     ← promise-no-act guard (different angle)
+├── scripts/
+│   ├── gate/                  ← ledger, verify_state, parse_tool_result…
+│   └── shadow/                ← shadow logger + A/B holdout
+├── packs/
+│   ├── investigation-protocol.txt
+│   └── verification-grounding-pack.txt
+├── skills/fablize/SKILL.md    ← the /fablize slash command
+├── commands/setup.md
+└── setup/setup.sh             ← injects block into ~/.claude/CLAUDE.md</code></pre>
+
+  <h3><span class="tag tag-opencode">elicify-fable-transform</span> (opencode plugin)</h3>
+  <pre><code>elicify-fable-transform/
+├── src/index.ts                          ← the plugin
+├── skills/elicify-fable-transform/SKILL.md
+├── SKILL.md                              ← /elicify-fable-transform
+├── scripts/install-skill.sh              ← no-symlink skill installer
+├── tests/formatDirectives.test.ts
+├── package.json + tsconfig.json + vitest.config.ts
+└── README.md + LICENSE
+
+(Installed into the opencode runtime via opencode.json → "plugin")
+
+Companion (separate, in ~/.config/opencode/):
+├── agents/elicify-fable-architect.md     ← the principal agent
+└── skills/elicify-fable-transform/…      ← the slash command</code></pre>
+
+  <!-- =========================================================== -->
+  <h2>3. The injection triggers — what fires when</h2>
+
+  <p>Each row is a real event from the model/agent loop. The right column is what the plugin <em>does</em> in response.</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Event</th>
+        <th><span class="tag tag-claude">fablize</span></th>
+        <th><span class="tag tag-opencode">elicify-fable-transform</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>User submits a prompt</td>
+        <td><code>UserPromptSubmit</code> hook fires <code>router.sh</code> + <code>gate_prompt.py</code> in parallel. The hook's <code>additionalContext</code> is added as a separate <strong>user</strong> message on the next LLM turn.</td>
+        <td>No equivalent hook. The prompt-time contract comes from the <strong>architect agent's</strong> system prompt and the SKILL.md, not from the plugin.</td>
+      </tr>
+      <tr>
+        <td>Model calls a tool (Bash/Edit/Write)</td>
+        <td><code>PostToolUse</code> fires <code>gate_post_tool.py</code>. If a failure repeats, it returns <code>additionalContext</code> which Claude injects as a <strong>user</strong> message on the next turn.</td>
+        <td><code>tool.execute.after</code> fires (in the opencode plugin if you wire one). The correct move: call <code>t.enqueue(sessionID, { id, text })</code>; on the <em>next</em> LLM call, <code>system.transform</code> drains the queue and appends a tagged block to the system prompt.</td>
+      </tr>
+      <tr>
+        <td>Model is about to stop</td>
+        <td><code>Stop</code> hook fires <code>gate_stop.py</code>. If the ledger shows work without observed verification, it returns <code>{"decision": "block", "reason": "..."}</code> and Claude's runtime re-prompts the model with the reason.</td>
+        <td>opencode fires <code>event({ type: "session.idle" })</code>. The plugin calls <code>client.session.prompt({ path: { id }, body: { parts: [...] } })</code> to inject a new user turn that contains the stop-block reason.</td>
+      </tr>
+      <tr>
+        <td>Every LLM call</td>
+        <td>(Claude has no global LLM-call hook; the per-event hooks are the injection surface.)</td>
+        <td><code>experimental.chat.system.transform</code> fires. The plugin drains its per-session directive queue and appends a tagged block to <code>output.system</code>. This is the <strong>primary</strong> injection point in opencode.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- =========================================================== -->
+  <h2>4. The single source of truth</h2>
+
+  <p>"Source of truth" here means: <em>where is the contract that says "the model must verify before it claims done"</em>?</p>
+
+  <div class="grid grid-2">
+    <div class="card card-claude">
+      <h3>fablize — two sources, both true</h3>
+      <ol>
+        <li><strong>Static (always-on):</strong> <code>setup/setup.sh</code> injects <code>fablize-block.md</code> into <code>~/.claude/CLAUDE.md</code>. The model sees it on every turn as a system instruction.</li>
+        <li><strong>Dynamic (per-event):</strong> <code>hooks/hooks.json</code> + the four <code>gate_*.py</code> scripts. The runtime calls them on UserPromptSubmit / PostToolUse / Stop and their <code>additionalContext</code> lands as a real <code>user</code> message in the next turn.</li>
+      </ol>
+      <p>The two are consistent because the static block is the long-form contract and the dynamic hooks are the short, contextual nudges.</p>
+    </div>
+    <div class="card card-opencode">
+      <h3>elicify-fable-transform — three layers, one contract</h3>
+      <ol>
+        <li><strong>Static (always-on):</strong> the <code>elicify-fable-architect.md</code> agent's <code>&lt;elicify_fable_operating_mode&gt;</code> block. It is the model-resident operating procedure.</li>
+        <li><strong>Skill (on demand):</strong> <code>/elicify-fable-transform</code> slash command (<code>SKILL.md</code>) is invoked by the user or auto-loaded by the agent when steering is needed.</li>
+        <li><strong>Dynamic (per-session):</strong> the plugin's <code>DirectiveQueue</code>, drained on every LLM call by <code>experimental.chat.system.transform</code>, appending <code>&lt;elicify-fable-directives&gt;…&lt;/elicify-fable-directives&gt;</code> to the system prompt.</li>
+      </ol>
+      <p>All three converge on the same wording of the verification reminder, so the model cannot tell whether it came from the system prompt, the skill, or the runtime queue — and that is the point.</p>
+    </div>
+  </div>
+
+  <!-- =========================================================== -->
+  <h2>5. Sequence — what actually happens on one turn</h2>
+
+  <h3><span class="tag tag-claude">fablize</span></h3>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant C as Claude runtime
+  participant H as hook scripts
+  participant M as Model
+  participant T as Tool (Bash/Edit/Write)
+
+  U->>C: "refactor X"
+  C->>H: UserPromptSubmit(router.sh + gate_prompt.py)
+  H-->>C: {additionalContext: "fablize:contract"}
+  C->>M: user_prompt + injected context (next LLM turn)
+  M-->>C: tool_call(bash)
+  C->>T: bash(...)
+  T-->>C: tool_result
+  C->>H: PostToolUse(gate_post_tool.py)
+  alt failure repeated
+    H-->>C: {additionalContext: "stop silent retry"}
+    C->>M: user_prompt + injected context
+  end
+  M-->>C: "done" (Stop)
+  C->>H: Stop(gate_stop.py)
+  alt ledger: no verification observed
+    H-->>C: {decision: block, reason}
+    C->>M: re-prompt with reason
+  else ledger clean
+    H-->>C: {}
+    C-->>U: final answer
+  end
+  </div>
+
+  <h3><span class="tag tag-opencode">elicify-fable-transform</span></h3>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant OC as opencode runtime
+  participant P as Plugin (src/index.ts)
+  participant Q as DirectiveQueue
+  participant M as Model
+  participant T as Tool
+
+  U->>OC: "refactor X"
+  OC->>P: chat.system.transform (per LLM call)
+  P->>Q: drain(sessionID)
+  Q-->>P: [directives...]
+  P-->>OC: output.system += tagged block
+  OC->>M: messages (system + history)
+  M-->>OC: tool_call
+  OC->>T: run tool
+  T-->>OC: tool_result
+  Note over OC,P: A Stop/PostToolUse hook elsewhere<br/>calls p.enqueue(sessionID, {id, text})
+  OC->>P: event(session.idle) (optional)
+  P->>Q: enqueue(stop-block reason)
+  OC->>P: chat.system.transform (next LLM call)
+  P->>Q: drain(sessionID) -> includes new directive
+  P-->>OC: output.system += updated block
+  OC->>M: messages
+  M-->>OC: answer
+  </div>
+
+  <!-- =========================================================== -->
+  <h2>6. Anatomy of an injection</h2>
+
+  <p>What does the model actually see in its input? Here is the literal text.</p>
+
+  <h3><span class="tag tag-claude">fablize</span> (from <code>gate_prompt.py</code>)</h3>
+  <pre><code>// Returned in hookSpecificOutput.additionalContext
+[elicify-fable] Verification reminder: before reporting a task as done,
+- observe the actual output of the change (run the test, render the artifact, hit the endpoint);
+- ground any "done" claim in a tool result from this turn, not in intent;
+- if a step failed and you cannot fix it, surface that explicitly.</code></pre>
+  <p>Claude's runtime treats this as a real <code>user</code> turn on the next LLM call. It is a strong steer because the model reads it as a fresh message from a participant.</p>
+
+  <h3><span class="tag tag-opencode">elicify-fable-transform</span> (appended to <code>output.system</code>)</h3>
+  <pre><code>&lt;elicify-fable-directives ts="2026-07-23T11:24:00Z"&gt;
+[elicify-fable:contract @ 2026-07-23T11:24:00Z]
+[elicify-fable] Verification reminder: before reporting a task as done,
+- observe the actual output of the change ...
+- ground any "done" claim in a tool result from this turn ...
+- if a step failed and you cannot fix it, surface that explicitly.
+&lt;/elicify-fable-directives&gt;</code></pre>
+  <p>opencode's runtime appends this to the system prompt. The XML-style wrapper is <em>not</em> a magic tag — it is a visual marker so the model (and you, when reading logs) can recognise harness-injected text. The LLM treats it as a system instruction: a higher-priority steer than user-typed text.</p>
+
+  <!-- =========================================================== -->
+  <h2>7. What makes the model behave like Fable</h2>
+
+  <p>Both harnesses converge on a small set of behavioural instructions, just delivered in different ways. Here is what is in the contract, regardless of which harness delivers it:</p>
+
+  <table>
+    <thead>
+      <tr><th>Behaviour</th><th>How it is conveyed in <span class="tag tag-claude">fablize</span></th><th>How it is conveyed in <span class="tag tag-opencode">elicify-fable-transform</span></th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Verify before reporting done</strong></td>
+        <td>Injected as <code>additionalContext</code> on every prompt + as the always-on block in <code>~/.claude/CLAUDE.md</code>.</td>
+        <td>In the architect agent's <code>&lt;reasoning_protocol&gt;</code> step 7 + as the default <code>elicify-fable:contract</code> directive in the plugin's system prompt.</td>
+      </tr>
+      <tr>
+        <td><strong>Refuse to finish unverified</strong></td>
+        <td><code>Stop</code> hook returns <code>decision: block</code> with a reason. Claude re-prompts the model.</td>
+        <td><code>event(session.idle)</code> handler calls <code>client.session.prompt()</code> to inject a re-prompt turn, and/or enqueues a <code>stop:block</code> directive that lands on the next LLM call.</td>
+      </tr>
+      <tr>
+        <td><strong>Don't retry silently</strong></td>
+        <td><code>PostToolUse</code> detects a repeated failure class and returns <code>additionalContext</code> "stop retrying silently".</td>
+        <td>Same logic can call <code>t.enqueue(sessionID, { id: "post-tool:repeat-failure", text: "..." })</code>; the directive lands on the next LLM call.</td>
+      </tr>
+      <tr>
+        <td><strong>Escalate at the capability ceiling</strong></td>
+        <td>Static block in <code>CLAUDE.md</code> &amp; in the <code>/fablize</code> SKILL.md.</td>
+        <td>Static block in the <code>elicify-fable-architect.md</code> agent's <code>&lt;uncertainty&gt;</code> section.</td>
+      </tr>
+      <tr>
+        <td><strong>Use the goal engine on multi-step work</strong></td>
+        <td>Referenced in CLAUDE.md block and SKILL.md. Lives at <code>~/.config/opencode/fablize/scripts/goals.py</code>.</td>
+        <td>Referenced in the architect agent's <code>&lt;goals&gt;</code> section. Same script (the elicify-fable plugin reuses it via the existing install).</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- =========================================================== -->
+  <h2>8. What is correct about each, what is wrong</h2>
+
+  <div class="grid grid-2">
+    <div class="card card-claude">
+      <h3>fablize</h3>
+      <p><strong>Correct:</strong> <code>additionalContext</code> is genuinely a separate message in Claude's next turn, so steering is strong.</p>
+      <p><strong>Also correct:</strong> the Stop hook can <code>block</code>, which is a real Claude control-plane action, not a polite suggestion.</p>
+      <p><strong>Limitation:</strong> the harness is tied to Claude's plugin runtime — it cannot be ported verbatim to a non-Claude runtime.</p>
+    </div>
+    <div class="card card-opencode">
+      <h3>elicify-fable-transform</h3>
+      <p><strong>Correct:</strong> <code>system.transform</code> is the SDK-native way to mutate the system prompt. It is the right hook for "inject a directive on the next LLM call".</p>
+      <p><strong>Also correct:</strong> the per-session FIFO queue gives any other hook (Stop, PostToolUse, custom event) a clean way to schedule a directive without coupling.</p>
+      <p><strong>Known gap:</strong> the SDK's <code>messages.transform</code> does not yet expose <code>sessionID</code>, so the global drain is intentionally lossy — prefer <code>system.transform</code>.</p>
+    </div>
+  </div>
+
+  <!-- =========================================================== -->
+  <h2>9. What the opencode plugin fixes (vs. a naive port)</h2>
+
+  <p>A naive port of fablize into opencode would do this in <code>tool.execute.after</code>:</p>
+
+  <pre><code>// NAIVE — what you should NOT do
+async "tool.execute.after"(input, output) {
+  const ctx = await runGatePostTool(input, output)
+  if (ctx) output.output = `${output.output}\n\n${ctx}`   // ❌ stamps tool output
+}</code></pre>
+
+  <p>It <em>reaches</em> the LLM (the stamped text is in the tool result on the next turn) but the LLM reads it as the tool's reply, not as a directive. Steering is weak.</p>
+
+  <p>What elicify-fable-transform does instead:</p>
+
+  <pre><code>// CORRECT — what the plugin actually does
+async "experimental.chat.system.transform"(input, output) {
+  const queued = queue.drain(input.sessionID)
+  const block  = formatDirectives(queued)   // tagged <elicify-fable-directives>
+  if (block) output.system = [...output.system, block]
+}</code></pre>
+
+  <p>Now the text is on the system channel, which the model treats as a higher-priority instruction than tool output. Same intent, correct layer.</p>
+
+  <!-- =========================================================== -->
+  <h2>10. One-page summary</h2>
+
+  <div class="mermaid">
+flowchart LR
+  subgraph CLAUDE[fablize on Claude]
+    direction TB
+    UPS[UserPromptSubmit]:::claude --> RI[router.sh + gate_prompt.py]:::claude --> AC1[additionalContext]:::claude
+    PTU[PostToolUse]:::claude --> GPT[gate_post_tool.py]:::claude --> AC2[additionalContext]:::claude
+    STP[Stop]:::claude --> GST[gate_stop.py]:::claude --> BLK[decision block]:::claude
+  end
+
+  subgraph OC[elicify-fable-transform on opencode]
+    direction TB
+    ENQ[enqueue sessionID,id,text]:::oc --> Q[DirectiveQueue]:::oc
+    ST[chat.system.transform]:::oc --> DR[drain sessionID]:::oc --> APP[append to output.system]:::oc
+    MT[chat.messages.transform fallback]:::oc --> DR2[drain all]:::oc --> SYN[synthetic part on last msg]:::oc
+    IDLE[event session.idle]:::oc --> CL[client.session.prompt]:::oc
+  end
+
+  classDef claude fill:#fef3c7,stroke:#d97706,stroke-width:1px,color:#1a1a1a
+  classDef oc fill:#dbeafe,stroke:#2563eb,stroke-width:1px,color:#1a1a1a
+  </div>
+
+  <ul>
+    <li><strong>Same intent:</strong> put a verification reminder / stop-block reason into the LLM's next-turn input.</li>
+    <li><strong>Different mechanism:</strong> Claude = <code>additionalContext</code> returned from a hook, injected as a user message. opencode = <code>system.transform</code> appends to the system prompt; the plugin exposes a tiny <code>enqueue()</code> for hooks to use.</li>
+    <li><strong>Source of truth:</strong> in both cases it is the always-on block (CLAUDE.md / architect agent system prompt) plus the dynamic hooks. The two are kept in sync by deliberate wording, not by code generation.</li>
+    <li><strong>Triggers:</strong> per-event hooks (Claude) vs. per-LLM-call transform + per-event <code>event()</code> handler (opencode). The opencode model is more composable because <code>enqueue()</code> decouples the producer from the consumer.</li>
+    <li><strong>Common pitfall:</strong> stamping <code>output.output</code> in a tool hook is the <em>wrong</em> layer in both runtimes — it reaches the model as the tool's reply, not as an instruction.</li>
+  </ul>
+
+  <p class="footer">Document path: <code>/home/dev/elicify-fable-transform/docs/comparison.html</code>. Rendered with Mermaid 10.9.1 + system fonts. No external CSS framework.</p>
+
+</body>
+</html>
