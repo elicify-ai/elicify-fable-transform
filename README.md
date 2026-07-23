@@ -28,7 +28,20 @@ An [opencode](https://opencode.ai) plugin that injects harness directives into t
 
 ## Install
 
-Add to your `opencode.json`:
+The plugin is **self-contained** — no symlinks required.
+
+### From npm
+
+```bash
+npm install elicify-fable-transform
+```
+
+The `postinstall` hook runs `scripts/install-skill.sh`, which copies the
+shipped `SKILL.md` into `${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills/elicify-fable-transform/SKILL.md`
+as a **real file** (no symlink). The `/elicify-fable-transform` slash
+command is then available in opencode.
+
+Add the plugin to `opencode.json`:
 
 ```json
 {
@@ -36,13 +49,47 @@ Add to your `opencode.json`:
 }
 ```
 
-For local development, point the plugin entry at your working copy:
+### From source (local dev)
+
+```bash
+git clone https://github.com/elicify-ai/elicify-fable-transform
+cd elicify-fable-transform
+npm install
+npm run setup        # copies SKILL.md to ~/.config/opencode/skills/...
+npm run build
+```
+
+Then point opencode at the working copy:
 
 ```json
 {
   "plugin": ["./elicify-fable-transform/src/index.ts"]
 }
 ```
+
+### Custom install location
+
+```bash
+SKILL_TARGET_DIR=/path/to/skills/elicify-fable-transform bash scripts/install-skill.sh
+```
+
+To overwrite an existing `SKILL.md`:
+
+```bash
+SKILL_FORCE=1 bash scripts/install-skill.sh
+```
+
+### What is NOT a symlink
+
+- The skill file is copied as a regular file.
+- The plugin source lives in `node_modules/` (or your local path) as real files.
+- No symlinks to `~/.claude/skills`, `~/.config/opencode/fablize`, or any other
+  system path are created by this package.
+
+If your `~/.config/opencode/skills` happens to be a symlink to
+`~/.claude/skills` (a pre-existing system condition on elicify-devpods), the
+plugin will follow it and write a real file there. That is the user's
+symlink, not this plugin's.
 
 ## Usage from another plugin
 

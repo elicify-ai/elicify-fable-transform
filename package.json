@@ -16,14 +16,17 @@
     "README.md",
     "LICENSE",
     "SKILL.md",
-    "skills"
+    "skills",
+    "scripts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "setup": "bash scripts/install-skill.sh",
+    "postinstall": "bash scripts/install-skill.sh || true"
   },
   "keywords": [
     "opencode",
