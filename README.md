@@ -49,7 +49,7 @@ You keep your preferred model. Vertex raises the floor of how it *works*.
 
 ## How behaviour changes
 
-When Vertex is **active** for a session (agent or `/vertex`), the model’s behaviour shifts in concrete ways:
+When Vertex is **active** for a session (**Elicify-Vertex-Agent** or `/elicify-vertex`), the model’s behaviour shifts in concrete ways:
 
 | Situation | Without Vertex | With Vertex |
 |---|---|---|
@@ -63,7 +63,7 @@ When Vertex is **active** for a session (agent or `/vertex`), the model’s beha
 | Code review | Sparse “looks fine” | **Review-recall**: collect low-confidence findings first, then filter with evidence |
 | Multi-step plan | Ad-hoc checklist | Optional **goals** tools + verification receipts so “complete” is earned |
 | Tone of the report | Verbose, hype, apology loops | Contract pushes **outcome-first, calm, short** reporting |
-| Other OpenCode sessions | — | **Untouched** — zero inject until you activate |
+| Other OpenCode sessions | — | **Untouched** — zero inject until you pick the agent or run `/elicify-vertex` |
 
 Mechanically: Vertex injects directives into the system prompt, **observes** tools (edits, bash, verifiers), **records** evidence, and on `session.idle` can **block** completion and re-prompt until the bar is met. If the plugin itself errors, it **fails open** so a broken harness never freezes your session.
 
@@ -124,26 +124,29 @@ From a git clone (after `npm run build`):
 
 ## How to use
 
-The plugin loads quietly. It **only changes behaviour when activated**:
+The plugin loads quietly. It **only changes behaviour when activated** — two ways:
 
-### 1. Agent (full workflow)
+### 1. Elicify-Vertex-Agent (recommended)
 
-Select **Elicify-Vertex-Agent** (`elicify-vertex-agent`). Plans, decomposes, delegates when useful, integrates after verification.
+In OpenCode, select the primary agent **Elicify-Vertex-Agent** (`elicify-vertex-agent`).
 
-### 2. Slash commands (any session)
+That agent is installed with the package (`postinstall` → `~/.config/opencode/agents/…`). It owns the full arc of a task: plan, decompose, delegate when useful, integrate only after verification. **Choosing this agent turns the harness on for the session automatically** — no slash command required.
 
-| Command | Effect |
-|--------|--------|
-| `/elicify-vertex` | Activate the harness for this session |
-| `/vertex` | Same (short alias) |
+### 2. Slash command `/elicify-vertex`
 
-Optional goals: `/vertex-goal-create`, `/vertex-goal-next`, `/vertex-goal-checkpoint`, `/vertex-goal-status`.
+In any other agent/session, run:
 
-### 3. Skill
+```text
+/elicify-vertex
+```
 
-Installed skill **`vertex`** — harness discipline without switching primary agents.
+That is the **only** activation slash command. It turns on the same verification harness for the current session without switching primary agents.
 
-Agent + slash can be combined: strategy from the agent, enforcement from the harness.
+Optional goal helpers (after the harness is active): `/vertex-goal-create`, `/vertex-goal-next`, `/vertex-goal-checkpoint`, `/vertex-goal-status`.
+
+### Skill (installed automatically)
+
+The **`vertex`** skill is copied to `~/.config/opencode/skills/vertex/` for OpenCode’s skill catalog. Day-to-day activation is still **agent** or **`/elicify-vertex`**.
 
 ---
 

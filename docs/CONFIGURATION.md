@@ -10,7 +10,7 @@ Passed as the second argument to the plugin factory (`ElicifyVertexPlugin(input,
 | Option | Type | Default | Meaning |
 |--------|------|---------|---------|
 | `activeAgent` | `string` | `"elicify-vertex-agent"` | `chat.message` agent name that activates the session gate. |
-| `activeSkillTrigger` | `string` | `"/elicify-vertex"` | Slash/skill prefix that activates the gate. **`/vertex` is always accepted as an additional alternative** in the trigger regex. |
+| `activeSkillTrigger` | `string` | `"/elicify-vertex"` | Slash prefix that activates the gate. **Only `/elicify-vertex`** (no `/vertex` alias). |
 | `maxStopBlocks` | `number` | `3` | Max hard stop / promise-no-act blocks before warn-and-proceed. |
 | `maxPerSession` | `number` | `16` | Cap on `DirectiveQueue` depth per session (FIFO drop from head). |
 | `systemDirectives` | `() => readonly Directive[]` | Contract block (`vertex:contract`) | Always-on directives merged every `system.transform` while gate is active. |

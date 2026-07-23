@@ -178,7 +178,7 @@ console.log("A. Activation")
   const sid4 = "uat-a4"
   await hooks["chat.message"](
     { sessionID: sid4, agent: "build" },
-    { message: {}, parts: [{ type: "text", text: "is the /vertex plugin working?" }] },
+    { message: {}, parts: [{ type: "text", text: "is the /elicify-vertex plugin working?" }] },
   )
   const inj4 = await systemInject(hooks, sid4)
   assert("A4-mid-sentence-no-activate", !inj4.includes("vertex-directives"), "mid-sentence does not activate")

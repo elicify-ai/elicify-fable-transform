@@ -1090,12 +1090,6 @@ Then proceed with the user's request under the vertex verification discipline:
 verify before claiming done, control things manually, communicate calmly.`,
         }
       }
-      if (!cfgInput.command.vertex) {
-        cfgInput.command.vertex = {
-          description: "Activate elicify-vertex verification harness for this session.",
-          template: "Activate the elicify-vertex verification harness, then continue with the user's request under its verification discipline.",
-        }
-      }
       const goalCommands: Record<string, { description: string; template: string }> = {
         "vertex-goal-create": {
           description: "Create a persisted multi-story goal plan.",
@@ -1120,7 +1114,7 @@ verify before claiming done, control things manually, communicate calmly.`,
     },
 
     async "command.execute.before"(commandInput) {
-      if (commandInput.command === "elicify-vertex" || commandInput.command === "vertex") {
+      if (commandInput.command === "elicify-vertex") {
         commandActivatedSessions.add(commandInput.sessionID)
         gate.activate(commandInput.sessionID)
         debug(`command.execute.before: ACTIVATED session ${commandInput.sessionID}`)
@@ -1139,10 +1133,9 @@ verify before claiming done, control things manually, communicate calmly.`,
           .map((p) => (p as any).text)
           .join("\n")
 
-        const triggerAlternatives = [...new Set([opts.activeSkillTrigger, "/vertex"])]
-          .map((trigger) => trigger.replace(/[.*+?^${}()|[\]\\\\]/g, "\\\\$&"))
-          .join("|")
-        const triggerRe = new RegExp(`^\\s*(?:${triggerAlternatives})\\b`, "m")
+        // Single activation slash: activeSkillTrigger only (default /elicify-vertex).
+        const triggerEscaped = opts.activeSkillTrigger.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        const triggerRe = new RegExp(`^\\s*${triggerEscaped}\\b`, "m")
 
         const activatedByCommand = commandActivatedSessions.has(msgInput.sessionID)
         if (agent === opts.activeAgent || triggerRe.test(text) || activatedByCommand || gateContinuation) {

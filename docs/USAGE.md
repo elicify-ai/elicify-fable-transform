@@ -11,8 +11,8 @@ Activation paths (any one):
 
 | Path | How |
 |------|-----|
-| **Agent** | Primary agent name equals `activeAgent` (default `elicify-vertex-agent`). |
-| **Slash / skill** | User text matches `activeSkillTrigger` (default `/elicify-vertex`) **or** `/vertex` at the start of a line. |
+| **Agent (recommended)** | Primary agent is **Elicify-Vertex-Agent** (`elicify-vertex-agent` / `activeAgent`). |
+| **Slash** | User text matches `activeSkillTrigger` (default `/elicify-vertex`) at the start of a line. No `/vertex` alias. |
 | **Command** | OpenCode commands `elicify-vertex` or `vertex` (registered in the `config` hook). `command.execute.before` activates immediately; the first matching `chat.message` also activates. |
 | **Gate continuation** | After a stop / promise block, an internal `session.prompt` re-enters the turn; that message keeps the gate on and **does not** reset the ledger. |
 

@@ -27,9 +27,8 @@ The plugin loads with opencode but only **injects / gates** when a session is ac
 
 | Path | How |
 |------|-----|
-| **Agent** | Use **Elicify-Vertex-Agent** (`elicify-vertex-agent`) — default `activeAgent` |
-| **Skill / slash** | Leading `/elicify-vertex` (default `activeSkillTrigger`) or `/vertex` |
-| **Commands** | `/elicify-vertex` or `/vertex` (registered via the config hook) |
+| **Agent (recommended)** | **Elicify-Vertex-Agent** (`elicify-vertex-agent`) — default `activeAgent` |
+| **Slash** | `/elicify-vertex` only (default `activeSkillTrigger`; registered via config hook) |
 
 Other agents/sessions stay untouched (gate deactivates when another named agent is selected).
 
@@ -106,7 +105,7 @@ interface ElicifyVertexOptions {
   wireMessagesTransform?: boolean     // default true
   systemDirectives?: () => readonly Directive[]  // default: vertex:contract
   activeAgent?: string                // default "elicify-vertex-agent"
-  activeSkillTrigger?: string         // default "/elicify-vertex" (+"/vertex" always accepted)
+  activeSkillTrigger?: string         // default "/elicify-vertex" 
   maxStopBlocks?: number              // default 3
 }
 ```

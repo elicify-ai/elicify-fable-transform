@@ -101,7 +101,7 @@ assert A1-reply "rg -q 'A1_OK' /tmp/oc-uat-runs/A1.out"
 # ---------- A2: inactive agent should not activate if we use build ----------
 log ""
 CASE_ID=A2
-log "A2 no activation on build agent (no /vertex)"
+log "A2 no activation on build agent (no /elicify-vertex)"
 clear_tel
 (
   cd "$WORK"

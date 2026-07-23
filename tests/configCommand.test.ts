@@ -17,7 +17,8 @@ describe("ElicifyVertexPlugin.config", () => {
     expect(input.command["elicify-vertex"].description).toEqual(expect.any(String))
     // Guard against the regression: `prompt` is NOT a valid field.
     expect(input.command["elicify-vertex"].prompt).toBeUndefined()
-    expect(input.command.vertex?.template).toEqual(expect.any(String))
+    // Single activation slash command — no /vertex alias.
+    expect(input.command.vertex).toBeUndefined()
   })
 
   it("does not overwrite a user-provided elicify-vertex command", async () => {
@@ -84,7 +85,7 @@ describe("ElicifyVertexPlugin.config", () => {
     const hooks = await ElicifyVertexPlugin({} as any, undefined)
     const sessionID = "slash-session"
     await hooks["command.execute.before"]!({
-      command: "vertex",
+      command: "elicify-vertex",
       sessionID,
       arguments: "verify this",
     }, { parts: [] })
@@ -136,7 +137,10 @@ describe("ElicifyVertexPlugin.chat.message activation gate", () => {
   it("activates when the user message STARTS with the trigger", async () => {
     const active = await gateActiveFor("s2", "build", "/elicify-vertex please verify")
     expect(active).toBe(true)
-    expect(await gateActiveFor("s2-alias", "build", "/vertex please verify")).toBe(true)
+  })
+
+  it("does NOT activate on the retired /vertex alias", async () => {
+    expect(await gateActiveFor("s2-alias", "build", "/vertex please verify")).toBe(false)
   })
 
   it("activates with leading whitespace before the trigger", async () => {

@@ -23,7 +23,7 @@ Inactive sessions: no inject, no ledger mutation from tools (receipt minting for
 
 | Hook | Role |
 |------|------|
-| `config` | Registers `/elicify-vertex`, `/vertex`, and goal slash commands. |
+| `config` | Registers `/elicify-vertex` and goal slash commands. |
 | `command.execute.before` | Activates gate for `elicify-vertex` / `vertex` commands. |
 | `chat.message` | Activate/deactivate gate; classify task + stop mode; reset ledger (unless gate continuation). |
 | `tool.execute.after` | Observe mutations and bash verification/failures; mint receipts; enqueue failure / repeat-failure directives. |
