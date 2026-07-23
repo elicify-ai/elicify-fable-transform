@@ -1,9 +1,9 @@
 /**
  * elicify-vertex — measurement layer tests
  * --------------------------------------------------------------------------
- * Mirrors fablize tests/test_shadow.py + test_shadow_m3.py conventions in
- * vitest. Verifies: deterministic holdout, ~20% fraction, env-gated
- * suppression default-OFF, events written out-of-band (not into the repo).
+ * Measurement protocol conventions in vitest. Verifies: deterministic holdout,
+ * ~20% fraction, env-gated suppression default-OFF, events written out-of-band
+ * (not into the repo).
  */
 
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
@@ -27,7 +27,7 @@ import {
   makeEvent,
 } from "../src/measurement.js"
 
-// Mirrors fablize/tests/test_shadow.py:21-93.
+// Holdout arm + event writers.
 
 let tmpRoot: string
 let savedVertexData: string | undefined

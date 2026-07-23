@@ -78,8 +78,7 @@ function isValidTimestamp(value: unknown): value is string {
 }
 
 /** In-memory verified-command receipts. The persisted final checkpoint embeds
- * a sanitized copy, unlike fablize's caller-authored verify strings
- * (/tmp/fablize-deep/scripts/goals.py:98-108). */
+ * a sanitized copy of observed receipts rather than caller-authored verify strings. */
 export class VerificationReceiptStore {
   private readonly bySession = new Map<string, VerificationReceipt[]>()
 

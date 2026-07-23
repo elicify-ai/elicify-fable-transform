@@ -7,7 +7,6 @@ import {
 
 // ---------------------------------------------------------------------------
 // Item 2: Mode-aware stop policy + docs-only exemption
-// Mirrors fablize scripts/gate/verify_state.py:18-49 + classify_task.py:14-26
 // ---------------------------------------------------------------------------
 
 describe("classifyFileKind — docs-only exemption", () => {
@@ -58,14 +57,14 @@ describe("classifyFileKind — docs-only exemption", () => {
   })
 })
 
-describe("classifyStopMode — mirrors fablize classify_task.py", () => {
+describe("classifyStopMode — stop-mode classifier", () => {
   it("classifies 'quick' prompts", () => {
     expect(classifyStopMode("just explain how this works").mode).toBe("quick")
     expect(classifyStopMode("review only, no edits").mode).toBe("quick")
     expect(classifyStopMode("brief overview").mode).toBe("quick")
     // Note: 'check if the test exists' contains the 'test' keyword which
     // matches NORMAL_RE. The QUICK pattern requires 'check only' as a
-    // contiguous phrase. This mirrors fablize classify_task.py:18.
+    // contiguous phrase.
     expect(classifyStopMode("check if the test exists").mode).toBe("normal")
   })
 
@@ -84,7 +83,7 @@ describe("classifyStopMode — mirrors fablize classify_task.py", () => {
     expect(classifyStopMode("large complex rewrite").mode).toBe("deep")
   })
 
-  it("matches fablize's Korean quick/normal/deep annotations", () => {
+  it("matches Korean quick/normal/deep annotations", () => {
     expect(classifyStopMode("설명만 해주세요").mode).toBe("quick")
     expect(classifyStopMode("이 버그를 수정해주세요").mode).toBe("normal")
     expect(classifyStopMode("끝까지 철저하게 검증해주세요").mode).toBe("deep")
@@ -129,7 +128,7 @@ describe("classifyStopMode — mirrors fablize classify_task.py", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Mode-aware stop gate behavior — mirrors fablize verify_state.should_block_stop
+// Mode-aware stop gate behavior — stop-gate policy (shouldBlockStop)
 // ---------------------------------------------------------------------------
 // These tests verify the LEDGER's shouldBlockStop logic, which uses taskMode
 // and changedFileKinds. The ledger is constructed in the same file but

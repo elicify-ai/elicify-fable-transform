@@ -7,9 +7,8 @@ import {
 import { EvidenceLedger } from "../src/index.js"
 
 // ---------------------------------------------------------------------------
-// Gate core: these tests would have caught the parity gaps flagged by the
-// fablize replication analysis. They verify the behaviours that, if wrong,
-// cause the harness to be net-negative (the "harness paradox" risk).
+// Gate core: these tests catch harness gaps that would make the stop gate
+// net-negative (the "harness paradox" risk).
 // ---------------------------------------------------------------------------
 
 describe("EvidenceLedger", () => {
@@ -116,8 +115,8 @@ describe("EvidenceLedger", () => {
 
 // ---------------------------------------------------------------------------
 // Task classifier — used by signal-routed injection.
-// fablize parity: classifyTask must put the prompt in the right bucket so
-// the right procedure lands in the system transform.
+// classifyTask must put the prompt in the right bucket so the right procedure
+// lands in the system transform.
 // ---------------------------------------------------------------------------
 
 describe("classifyTask", () => {
@@ -152,7 +151,7 @@ describe("classifyTask", () => {
 
 // ---------------------------------------------------------------------------
 // contextForMode — must return the full anti-bypass procedure, not a
-// compressed one-liner (fablize-prompt-comparison subagent, rows 15-18).
+// compressed one-liner.
 // ---------------------------------------------------------------------------
 
 describe("contextForMode", () => {

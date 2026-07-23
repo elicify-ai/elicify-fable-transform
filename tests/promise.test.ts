@@ -6,9 +6,9 @@ import {
 } from "../src/index.js"
 
 // ---------------------------------------------------------------------------
-// Promise-no-act detector — extends fablize finish-the-work.sh:59-62
+// Promise-no-act detector (finish-the-work policy)
 // Explicit deferral markers, issue-filing, follow-up, constrained later/
-// tracked/tracking (no bare-keyword FPs), and ask-user exemption (:64-69).
+// tracked/tracking (no bare-keyword FPs), and ask-user exemption.
 // ---------------------------------------------------------------------------
 
 describe("detectPromiseNoAct — explicit deferral markers", () => {
@@ -113,7 +113,7 @@ describe("detectPromiseNoAct — issue-filing intent", () => {
   })
 })
 
-describe("detectPromiseNoAct — future-intent pattern (fablize parity)", () => {
+describe("detectPromiseNoAct — future-intent pattern", () => {
   it("detects 'I'll implement next' pattern", () => {
     const hits = detectPromiseNoAct(
       "Tests pass. I'll implement the cache layer next.",

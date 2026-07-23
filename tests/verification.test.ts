@@ -2,9 +2,8 @@ import { describe, expect, it } from "vitest"
 
 import { parseVerification } from "../src/index.js"
 
-// Item 3: positive verification parsing. Fablize uses an unanchored command
-// search and trusts exit status before contradictory output
-// (/tmp/fablize-deep/scripts/gate/parse_tool_result.py:16-29,68-85).
+// Item 3: positive verification parsing — allowlisted executables at command
+// position; does not trust exit status when output is contradictory.
 
 describe("parseVerification — positive command allowlist", () => {
   const commands = [

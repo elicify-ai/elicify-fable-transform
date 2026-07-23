@@ -12,9 +12,7 @@ import {
 import { appendEvent, makeEvent } from "../src/measurement.js"
 import { redactForDisk, redactSecrets } from "../src/redaction.js"
 
-// Item 4 extends fablize's risk classifier and moves redaction to the final
-// write boundary (/tmp/fablize-deep/scripts/gate/classify_task.py:29-40;
-// /tmp/fablize-deep/scripts/gate/ledger.py:34-39,108-115).
+// Item 4: risk classifier + redaction at the final disk-write boundary.
 
 describe("detectRiskFlags", () => {
   it.each([
@@ -36,7 +34,7 @@ describe("detectRiskFlags", () => {
     ])
   })
 
-  it("supports Korean risk annotations beyond fablize's English-only hot path", () => {
+  it("supports Korean risk annotations", () => {
     expect(detectRiskFlags("운영 환경에 데이터베이스 스키마를 배포하고 토큰을 게시")).toEqual([
       "production",
       "database",

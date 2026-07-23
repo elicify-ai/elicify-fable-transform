@@ -7,3 +7,9 @@ dist/
 coverage/
 .vitest-cache/
 .elicify-vertex/
+.vertex/
+.vertex-events.jsonl
+.vertex-debug.log
+**/oc-uat-runs/
+*.uat-out
+*.uat-err

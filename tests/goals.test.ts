@@ -19,9 +19,8 @@ import {
   type VerificationReceipt,
 } from "../src/goals.js"
 
-// Item 5 ports create → next → checkpoint while closing fablize's string-only
-// final gate and false "all complete" state
-// (/tmp/fablize-deep/scripts/goals.py:69-111).
+// Item 5: create → next → checkpoint with receipt-backed final gate
+// (not string-only verify / false "all complete" state).
 
 const roots: string[] = []
 

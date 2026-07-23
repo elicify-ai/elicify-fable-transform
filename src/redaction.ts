@@ -1,6 +1,5 @@
-/** Redaction is applied at every disk-write boundary. Fablize redacts selected
- * command strings before persistence but writes the final ledger unsanitized
- * (/tmp/fablize-deep/scripts/gate/ledger.py:34-39,55-62,108-115).
+/** Redaction is applied at every disk-write boundary so secrets never land
+ * on disk in the evidence ledger or measurement events.
  */
 
 const SENSITIVE_LABEL = "(?:api[_-]?key|x-api-key|account[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passwd|authorization|cookie|set-cookie|client[_-]?secret|secret[_-]?access[_-]?key|private[_-]?key|database[_-]?url|db[_-]?url|connection[_-]?string|dsn|credential)"

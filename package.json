@@ -21,6 +21,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "README.md",
     "LICENSE",
     "SKILL.md",
@@ -36,7 +37,8 @@
     "test:watch": "vitest",
     "setup": "bash scripts/install-skill.sh",
     "uninstall": "bash scripts/uninstall.sh",
-    "postinstall": "bash scripts/install-skill.sh || true"
+    "postinstall": "bash scripts/install-skill.sh || true",
+    "uat": "node scripts/uat-harness.mjs"
   },
   "keywords": [
     "opencode",

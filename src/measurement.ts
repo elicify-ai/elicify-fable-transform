@@ -1,9 +1,8 @@
 /**
  * elicify-vertex — out-of-band measurement layer
  * --------------------------------------------------------------------------
- * Mirrors the fablize measurement protocol (MEASUREMENT_PROTOCOL.md §2-§7) in
- * TypeScript for an opencode plugin. Writes events to a JSONL ledger that the
- * plugin can never read back into the model context.
+ * Out-of-band measurement protocol for an opencode plugin. Writes events to a
+ * JSONL ledger that the plugin can never read back into the model context.
  *
  * OUT-OF-BAND GUARANTEE
  *   This module NEVER injects anything into the model prompt, additionalContext,
@@ -14,7 +13,7 @@
  *   If you need to display anything to the model, do it in src/index.ts via
  *   formatDirectives(). DO NOT route model-visible text through this file.
  *
- * HOLDOUT (MEASUREMENT_PROTOCOL.md §4)
+ * HOLDOUT
  *   - 20% of sessions are deterministically routed to the 'off' arm.
  *   - The arm is recomputed from a hash of sessionID each call so the same
  *     session always lands in the same arm.
@@ -23,14 +22,11 @@
  *   - The holdout release is env-gated (VERTEX_HOLDOUT=1) and defaults OFF,
  *     so the default gate behaviour is identical to before this layer existed.
  *
- * SUNSET (MEASUREMENT_PROTOCOL.md §7)
+ * SUNSET
  *   - SUNSET_SESSIONS = 50. The collector/exporter is expected to recommend
  *     removing the instrumentation once 50 sessions are reached without a
  *     comparable on/off signal. The constant is exported so the analysis
  *     side can read it.
- *
- * @see /tmp/fablize-deep/docs/MEASUREMENT_PROTOCOL.md
- * @see /tmp/fablize-deep/scripts/shadow/shadow_logger.py
  */
 
 import { createHash } from "node:crypto"
@@ -39,7 +35,7 @@ import { dirname, resolve } from "node:path"
 import { homedir } from "node:os"
 import { redactForDisk } from "./redaction.js"
 
-// ---------- constants (mirror fablize/shadow_logger.py:21-24) ----------------
+// ---------- constants --------------------------------------------------------
 
 /** §4: 20% of sessions go to the 'off' holdout arm. */
 export const HOLDOUT_OFF_FRACTION = 0.2
@@ -70,7 +66,7 @@ export interface MeasurementEvent {
   payload: EventPayload
 }
 
-// ---------- paths (override via VERTEX_DATA, mirror FABLIZE_DATA) ------------
+// ---------- paths (override via VERTEX_DATA) ---------------------------------
 
 function defaultDataRoot(): string {
   return resolve(homedir(), ".config", "opencode")
@@ -163,7 +159,7 @@ export function logEvent(
   return ev
 }
 
-// ---------- typed convenience writers (mirror fablize/shadow_collect.py) -----
+// ---------- typed convenience writers ----------------------------------------
 
 export interface ClassifyPayload extends EventPayload {
   mode: string

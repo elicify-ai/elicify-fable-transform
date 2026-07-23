@@ -6,8 +6,7 @@ import {
   isReviewTask,
 } from "../src/index.js"
 
-// Item 6 turns fablize's skill-only sentence into an always-routed review
-// signal (/tmp/fablize-deep/skills/fablize/SKILL.md:52-54).
+// Item 6: always-routed high-recall review signal.
 
 describe("isReviewTask", () => {
   it.each([
