@@ -71,7 +71,7 @@ Do **not** invent additional CLI flags for the plugin; configuration is via Open
 - If `opencode.json` is absent, it prints the manual plugin snippet and continues
 
 Registered OpenCode **commands** (always, via plugin `config` hook, not the shell installer):  
-`elicify-vertex`, `vertex`, `vertex-goal-create`, `vertex-goal-next`, `vertex-goal-checkpoint`, `vertex-goal-status`.
+`elicify-vertex`, `elicify-vertex-goal-create`, `elicify-vertex-goal-next`, `elicify-vertex-goal-checkpoint`, `elicify-vertex-goal-status`.
 
 Unregister: `npm run uninstall` → `scripts/uninstall.sh` (see that script for exact reverse steps).
 

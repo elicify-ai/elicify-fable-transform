@@ -142,7 +142,7 @@ In any other agent/session, run:
 
 That is the **only** activation slash command. It turns on the same verification harness for the current session without switching primary agents.
 
-Optional goal helpers (after the harness is active): `/vertex-goal-create`, `/vertex-goal-next`, `/vertex-goal-checkpoint`, `/vertex-goal-status`.
+Optional goal helpers (after the harness is active): `/elicify-vertex-goal-create`, `/elicify-vertex-goal-next`, `/elicify-vertex-goal-checkpoint`, `/elicify-vertex-goal-status`.
 
 ### Skill (installed automatically)
 

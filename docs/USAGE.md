@@ -105,10 +105,10 @@ Exposed as OpenCode tools (and matching slash commands under `config`):
 
 | Tool | Role |
 |------|------|
-| `vertex_goal_create` | Create sequential multi-story plan under `<worktree>/.elicify-vertex/goals.json`; appends a final **verification** story automatically. `replace` archives the prior plan. |
-| `vertex_goal_next` | Start or return the active pending story. |
-| `vertex_goal_checkpoint` | Checkpoint active story: `complete` \| `failed` \| `blocked` + evidence. Final verification story requires `verificationReceiptId` from this session’s observed success. |
-| `vertex_goal_status` | Read/validate persisted plan (or null). |
+| `elicify_vertex_goal_create` | Create sequential multi-story plan under `<worktree>/.elicify-vertex/goals.json`; appends a final **verification** story automatically. `replace` archives the prior plan. |
+| `elicify_vertex_goal_next` | Start or return the active pending story. |
+| `elicify_vertex_goal_checkpoint` | Checkpoint active story: `complete` \| `failed` \| `blocked` + evidence. Final verification story requires `verificationReceiptId` from this session’s observed success. |
+| `elicify_vertex_goal_status` | Read/validate persisted plan (or null). |
 
 State files (mode `0600`, dir `0700`): `goals.json`, `goals.ledger.jsonl`, lockfile; secrets redacted on disk (`redactForDisk`).
 

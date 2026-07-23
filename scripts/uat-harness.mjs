@@ -155,7 +155,7 @@ console.log("A. Activation")
   clearLogs()
   const sid2 = "uat-a2"
   await hooks["command.execute.before"](
-    { command: "vertex", sessionID: sid2, arguments: "" },
+    { command: "elicify-vertex", sessionID: sid2, arguments: "" },
     { parts: [] },
   )
   await hooks["chat.message"](
@@ -163,7 +163,7 @@ console.log("A. Activation")
     { message: {}, parts: [{ type: "text", text: "Activate the elicify-vertex verification harness." }] },
   )
   const inj2 = await systemInject(hooks, sid2)
-  assert("A2-slash-vertex-activates", inj2.includes("vertex-directives") && inj2.includes("vertex:contract"), "slash activates")
+  assert("A2-slash-elicify-vertex-activates", inj2.includes("vertex-directives") && inj2.includes("vertex:contract"), "slash activates")
   assert("A2-classify-event", eventsOf("classify", sid2).length >= 1, `classify count=${eventsOf("classify", sid2).length}`)
   assert("A2-debug-activated", debugText().includes("ACTIVATED"), "debug shows ACTIVATED")
 
@@ -362,20 +362,20 @@ console.log("\nG. Goals engine + receipts")
   const receiptId = out.metadata.vertexVerificationReceiptId
   assert("G1-receipt-without-goal-tool", typeof receiptId === "string" && receiptId.startsWith("vrf_"), String(receiptId))
 
-  await hooks.tool.vertex_goal_create.execute(
+  await hooks.tool.elicify_vertex_goal_create.execute(
     { brief: "uat plan", stories: [{ title: "work", objective: "do it" }], replace: true },
     ctx,
   )
-  await hooks.tool.vertex_goal_next.execute({}, ctx)
-  await hooks.tool.vertex_goal_checkpoint.execute(
+  await hooks.tool.elicify_vertex_goal_next.execute({}, ctx)
+  await hooks.tool.elicify_vertex_goal_checkpoint.execute(
     { id: "G001", status: "complete", evidence: "implemented in uat" },
     ctx,
   )
-  await hooks.tool.vertex_goal_next.execute({}, ctx)
+  await hooks.tool.elicify_vertex_goal_next.execute({}, ctx)
   // need fresh receipt after final story start
   const out2 = await bash(hooks, sid, "npm test", "20 passed", 0)
   const rid2 = out2.metadata.vertexVerificationReceiptId
-  const done = await hooks.tool.vertex_goal_checkpoint.execute(
+  const done = await hooks.tool.elicify_vertex_goal_checkpoint.execute(
     { id: "G002", status: "complete", evidence: "suite green", verificationReceiptId: rid2 },
     ctx,
   )
@@ -388,22 +388,22 @@ console.log("\nG. Goals engine + receipts")
   const sid2 = "uat-g-stale"
   const ctx2 = { sessionID: sid2, worktree, directory: worktree }
   await activate(hooks, sid2, "deep implement")
-  await hooks.tool.vertex_goal_create.execute(
+  await hooks.tool.elicify_vertex_goal_create.execute(
     { brief: "stale", stories: [{ title: "w", objective: "w" }], replace: true },
     ctx2,
   )
-  await hooks.tool.vertex_goal_next.execute({}, ctx2)
-  await hooks.tool.vertex_goal_checkpoint.execute(
+  await hooks.tool.elicify_vertex_goal_next.execute({}, ctx2)
+  await hooks.tool.elicify_vertex_goal_checkpoint.execute(
     { id: "G001", status: "complete", evidence: "w" },
     ctx2,
   )
-  await hooks.tool.vertex_goal_next.execute({}, ctx2)
+  await hooks.tool.elicify_vertex_goal_next.execute({}, ctx2)
   const o3 = await bash(hooks, sid2, "npm test", "1 passed", 0)
   const rid3 = o3.metadata.vertexVerificationReceiptId
   await edit(hooks, sid2)
   let threw = false
   try {
-    await hooks.tool.vertex_goal_checkpoint.execute(
+    await hooks.tool.elicify_vertex_goal_checkpoint.execute(
       { id: "G002", status: "complete", evidence: "stale", verificationReceiptId: rid3 },
       ctx2,
     )

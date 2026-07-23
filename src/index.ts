@@ -1016,7 +1016,7 @@ export const ElicifyVertexPlugin = async (
   return {
     // ── TOOLS: persistent multi-story goal engine ─────────────────────────
     tool: {
-      vertex_goal_create: tool({
+      elicify_vertex_goal_create: tool({
         description: "Create a sequential multi-story goal plan with an automatically appended final verification gate.",
         args: {
           brief: tool.schema.string().min(1),
@@ -1031,14 +1031,14 @@ export const ElicifyVertexPlugin = async (
           return JSON.stringify(plan, null, 2)
         },
       }),
-      vertex_goal_next: tool({
+      elicify_vertex_goal_next: tool({
         description: "Return the active story or start the next pending story in the persisted goal plan.",
         args: {},
         async execute(_args, context) {
           return JSON.stringify(goalEngine(context).next(), null, 2)
         },
       }),
-      vertex_goal_checkpoint: tool({
+      elicify_vertex_goal_checkpoint: tool({
         description: "Checkpoint the active story. Final completion requires an observed verification receipt from this session.",
         args: {
           id: tool.schema.string().min(1),
@@ -1057,7 +1057,7 @@ export const ElicifyVertexPlugin = async (
           return JSON.stringify(plan, null, 2)
         },
       }),
-      vertex_goal_status: tool({
+      elicify_vertex_goal_status: tool({
         description: "Read and validate the persisted multi-story goal plan for the current worktree.",
         args: {},
         async execute(_args, context) {
@@ -1091,21 +1091,21 @@ verify before claiming done, control things manually, communicate calmly.`,
         }
       }
       const goalCommands: Record<string, { description: string; template: string }> = {
-        "vertex-goal-create": {
+        "elicify-vertex-goal-create": {
           description: "Create a persisted multi-story goal plan.",
-          template: "Use vertex_goal_create to create a sequential plan from these arguments. Do not omit the final verification gate; it is appended automatically. Arguments: $ARGUMENTS",
+          template: "Use elicify_vertex_goal_create to create a sequential plan from these arguments. Do not omit the final verification gate; it is appended automatically. Arguments: $ARGUMENTS",
         },
-        "vertex-goal-next": {
+        "elicify-vertex-goal-next": {
           description: "Start or resume the next story in the persisted goal plan.",
-          template: "Call vertex_goal_next, report the active story, and work only that story until it is checkpointed.",
+          template: "Call elicify_vertex_goal_next, report the active story, and work only that story until it is checkpointed.",
         },
-        "vertex-goal-checkpoint": {
+        "elicify-vertex-goal-checkpoint": {
           description: "Checkpoint the active story with evidence.",
-          template: "Call vertex_goal_checkpoint using these arguments. A final complete checkpoint must use the receipt ID from an observed successful verification command. Arguments: $ARGUMENTS",
+          template: "Call elicify_vertex_goal_checkpoint using these arguments. A final complete checkpoint must use the receipt ID from an observed successful verification command. Arguments: $ARGUMENTS",
         },
-        "vertex-goal-status": {
+        "elicify-vertex-goal-status": {
           description: "Show the validated persisted multi-story goal plan.",
-          template: "Call vertex_goal_status and report the current plan, active story, and next legal transition.",
+          template: "Call elicify_vertex_goal_status and report the current plan, active story, and next legal transition.",
         },
       }
       for (const [name, command] of Object.entries(goalCommands)) {

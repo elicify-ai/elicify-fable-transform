@@ -34,7 +34,7 @@ Inactive sessions: no inject, no ledger mutation from tools (receipt minting for
 | `event` → `session.compacted` | Clear compacting flag. |
 | `event` → `file.edited` | If exactly one active session: invalidate receipts + record path as changed. |
 | `event` → `session.idle` | Stop gate + promise-no-act enforcement. |
-| `tool` (`vertex_goal_*`) | Persisted multi-story goals API. |
+| `tool` (`elicify_vertex_goal_*`) | Persisted multi-story goals API. |
 
 Public method on the hooks object: `enqueue(sessionID, directive)` for external callers.
 

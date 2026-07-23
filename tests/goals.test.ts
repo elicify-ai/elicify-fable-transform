@@ -256,18 +256,18 @@ describe("OpenCode goal-tool integration", () => {
     const context = { sessionID: "s1", worktree: root, directory: root } as any
     const tools = hooks.tool!
 
-    await tools.vertex_goal_create.execute({
+    await tools.elicify_vertex_goal_create.execute({
       brief: "integrated plan",
       stories: [{ title: "work", objective: "implement" }],
       replace: false,
     }, context)
-    await tools.vertex_goal_next.execute({}, context)
-    await tools.vertex_goal_checkpoint.execute({
+    await tools.elicify_vertex_goal_next.execute({}, context)
+    await tools.elicify_vertex_goal_checkpoint.execute({
       id: "G001",
       status: "complete",
       evidence: "implemented",
     }, context)
-    await tools.vertex_goal_next.execute({}, context)
+    await tools.elicify_vertex_goal_next.execute({}, context)
 
     const bashOutput = {
       title: "tests",
@@ -284,7 +284,7 @@ describe("OpenCode goal-tool integration", () => {
     expect(receiptID).toBeDefined()
     expect(bashOutput.output).toContain(receiptID)
 
-    const result = await tools.vertex_goal_checkpoint.execute({
+    const result = await tools.elicify_vertex_goal_checkpoint.execute({
       id: "G002",
       status: "complete",
       evidence: "full suite passed",
@@ -298,14 +298,14 @@ describe("OpenCode goal-tool integration", () => {
     const hooks = await ElicifyVertexPlugin({ worktree: root, directory: root } as any, undefined)
     const context = { sessionID: "s1", worktree: root, directory: root } as any
     const tools = hooks.tool!
-    await tools.vertex_goal_create.execute({
+    await tools.elicify_vertex_goal_create.execute({
       brief: "receipt freshness",
       stories: [{ title: "work", objective: "implement" }],
       replace: false,
     }, context)
-    await tools.vertex_goal_next.execute({}, context)
-    await tools.vertex_goal_checkpoint.execute({ id: "G001", status: "complete", evidence: "done" }, context)
-    await tools.vertex_goal_next.execute({}, context)
+    await tools.elicify_vertex_goal_next.execute({}, context)
+    await tools.elicify_vertex_goal_checkpoint.execute({ id: "G001", status: "complete", evidence: "done" }, context)
+    await tools.elicify_vertex_goal_next.execute({}, context)
 
     const bashOutput = { title: "tests", output: "195 passed", metadata: { exit: 0 } as Record<string, unknown> }
     await hooks["tool.execute.after"]!({
@@ -324,7 +324,7 @@ describe("OpenCode goal-tool integration", () => {
       args: { patchText: "*** Begin Patch\n*** Update File: src/index.ts\n*** End Patch" },
     }, { title: "patch", output: "done", metadata: {} })
 
-    await expect(tools.vertex_goal_checkpoint.execute({
+    await expect(tools.elicify_vertex_goal_checkpoint.execute({
       id: "G002",
       status: "complete",
       evidence: "stale proof",
@@ -354,18 +354,18 @@ describe("OpenCode goal-tool integration", () => {
     expect(earlyReceiptID).toMatch(/^vrf_/)
     expect(early.output).toContain(earlyReceiptID)
 
-    await tools.vertex_goal_create.execute({
+    await tools.elicify_vertex_goal_create.execute({
       brief: "mint before create",
       stories: [{ title: "work", objective: "implement" }],
       replace: false,
     }, context)
-    await tools.vertex_goal_next.execute({}, context)
-    await tools.vertex_goal_checkpoint.execute({
+    await tools.elicify_vertex_goal_next.execute({}, context)
+    await tools.elicify_vertex_goal_checkpoint.execute({
       id: "G001",
       status: "complete",
       evidence: "implemented",
     }, context)
-    await tools.vertex_goal_next.execute({}, context)
+    await tools.elicify_vertex_goal_next.execute({}, context)
 
     // Final receipt must be observed after the verification story starts.
     const finalOut = {
@@ -383,7 +383,7 @@ describe("OpenCode goal-tool integration", () => {
     expect(finalReceiptID).toMatch(/^vrf_/)
     expect(finalReceiptID).not.toBe(earlyReceiptID)
 
-    const result = await tools.vertex_goal_checkpoint.execute({
+    const result = await tools.elicify_vertex_goal_checkpoint.execute({
       id: "G002",
       status: "complete",
       evidence: "suite passed after pre-goal mint path",
@@ -398,14 +398,14 @@ describe("OpenCode goal-tool integration", () => {
     const context = { sessionID: "solo", worktree: root, directory: root } as any
     const tools = hooks.tool!
 
-    await tools.vertex_goal_create.execute({
+    await tools.elicify_vertex_goal_create.execute({
       brief: "file-edited invalidate",
       stories: [{ title: "work", objective: "implement" }],
       replace: false,
     }, context)
-    await tools.vertex_goal_next.execute({}, context)
-    await tools.vertex_goal_checkpoint.execute({ id: "G001", status: "complete", evidence: "done" }, context)
-    await tools.vertex_goal_next.execute({}, context)
+    await tools.elicify_vertex_goal_next.execute({}, context)
+    await tools.elicify_vertex_goal_checkpoint.execute({ id: "G001", status: "complete", evidence: "done" }, context)
+    await tools.elicify_vertex_goal_next.execute({}, context)
 
     await hooks["chat.message"]!({ sessionID: "solo", agent: "elicify-vertex-agent" } as any, {
       message: {} as any,
@@ -424,7 +424,7 @@ describe("OpenCode goal-tool integration", () => {
 
     await hooks.event!({ event: { type: "file.edited", properties: { file: "src/x.ts" } } as any })
 
-    await expect(tools.vertex_goal_checkpoint.execute({
+    await expect(tools.elicify_vertex_goal_checkpoint.execute({
       id: "G002",
       status: "complete",
       evidence: "stale after file.edited",
@@ -441,14 +441,14 @@ describe("OpenCode goal-tool integration", () => {
     const ctxB = { sessionID: "sess-b", worktree: rootB, directory: rootB } as any
 
     for (const ctx of [ctxA, ctxB]) {
-      await tools.vertex_goal_create.execute({
+      await tools.elicify_vertex_goal_create.execute({
         brief: `plan ${ctx.sessionID}`,
         stories: [{ title: "work", objective: "implement" }],
         replace: false,
       }, ctx)
-      await tools.vertex_goal_next.execute({}, ctx)
-      await tools.vertex_goal_checkpoint.execute({ id: "G001", status: "complete", evidence: "done" }, ctx)
-      await tools.vertex_goal_next.execute({}, ctx)
+      await tools.elicify_vertex_goal_next.execute({}, ctx)
+      await tools.elicify_vertex_goal_checkpoint.execute({ id: "G001", status: "complete", evidence: "done" }, ctx)
+      await tools.elicify_vertex_goal_next.execute({}, ctx)
     }
 
     await hooks["chat.message"]!({ sessionID: "sess-a", agent: "elicify-vertex-agent" } as any, {
@@ -473,7 +473,7 @@ describe("OpenCode goal-tool integration", () => {
     // Multi-active → no attribution, must not broadcast-invalidate.
     await hooks.event!({ event: { type: "file.edited", properties: { file: "src/shared.ts" } } as any })
 
-    const completeB = await tools.vertex_goal_checkpoint.execute({
+    const completeB = await tools.elicify_vertex_goal_checkpoint.execute({
       id: "G002",
       status: "complete",
       evidence: "b still valid",
