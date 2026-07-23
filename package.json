@@ -1,0 +1,57 @@
+{
+  "name": "@elicify-ai/elicify-fable-transform",
+  "version": "0.1.0",
+  "description": "Opencode plugin that injects harness directives into the LLM input via the official chat.transform hooks. The correct, SDK-native place to add post-tool evidence, loop reminders, and per-session instructions — instead of stamping tool output.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "fablize",
+    "fable",
+    "harness",
+    "verification",
+    "elicify"
+  ],
+  "author": "elicify-ai",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elicify-ai/elicify-fable-transform.git"
+  },
+  "bugs": {
+    "url": "https://github.com/elicify-ai/elicify-fable-transform/issues"
+  },
+  "homepage": "https://github.com/elicify-ai/elicify-fable-transform#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "^1.0.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.16.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
