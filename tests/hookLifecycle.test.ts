@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { ElicifyVertexPlugin } from "../src/index.js"
+import {
+  ElicifyVertexPlugin,
+  changedPathsFromTool,
+  isMutatingBashCommand,
+} from "../src/index.js"
+import * as measurement from "../src/measurement.js"
 
 function pluginInput(prompt = vi.fn(async () => ({}))) {
   return {
@@ -90,14 +95,52 @@ describe("final-response promise lifecycle", () => {
   })
 })
 
+describe("mutation matrix", () => {
+  it.each([
+    ["mkdir generated", true],
+    ["sed -i 's/a/b/' file.ts", true],
+    ["tee out.txt", true],
+    ["npm run build", true],
+    ["git commit -m 'msg'", true],
+    ["git add src/index.ts", true],
+    ["echo hello > out.txt", true],
+    ["printf 'x' >> out.txt", true],
+    ["cat preamble.txt > dest.txt", true],
+    ["python -c \"open('f','w').write('x')\"", true],
+    ["python3 -c \"open('f').write('x')\"", true],
+    ["node -e \"require('fs').writeFileSync('f','x')\"", true],
+    ["node -p \"require('fs').appendFileSync('f','x')\"", true],
+    ["echo pytest", false],
+    ["npm test", false],
+    ["git status", false],
+    ["git log --oneline", false],
+    ["cat README.md", false],
+    ["cmd 2>&1", false],
+    ["npm test >&2", false],
+    ["python -c \"print(open('f').read())\"", false],
+    ["node -e \"console.log(require('fs').readFileSync('f','utf8'))\"", false],
+  ] as const)("isMutatingBashCommand(%j) → %s", (command, expected) => {
+    expect(isMutatingBashCommand(command)).toBe(expected)
+  })
+
+  it("changedPathsFromTool maps bash mutations to bash-mutation", () => {
+    expect(changedPathsFromTool("bash", { command: "echo x > f" })).toEqual(["bash-mutation"])
+    expect(changedPathsFromTool("bash", { command: "echo x" })).toEqual([])
+    expect(changedPathsFromTool("edit", { filePath: "a.ts" })).toEqual(["a.ts"])
+  })
+})
+
 describe("mutation observation", () => {
   it.each([
     ["apply_patch", { patchText: "*** Begin Patch\n*** Update File: src/index.ts\n@@\n-old\n+new\n*** End Patch" }],
     ["bash", { command: "mkdir generated" }],
-  ])("hard-blocks deep unverified work changed through %s", async (tool, args) => {
+    ["bash-redirect", { command: "echo x > generated.txt" }],
+    ["bash-git-commit", { command: "git commit -m done" }],
+  ])("hard-blocks deep unverified work changed through %s", async (label, args) => {
     const prompt = vi.fn(async () => ({}))
     const hooks = await ElicifyVertexPlugin(pluginInput(prompt), undefined)
-    const sessionID = `mutation-${tool}`
+    const sessionID = `mutation-${label}`
+    const tool = label.startsWith("bash") ? "bash" : label
     await activate(hooks, sessionID, "deep implement the plan")
     await hooks["tool.execute.after"]!({ tool, sessionID, callID: "change", args }, {
       title: "change",
@@ -159,26 +202,148 @@ describe("mutation observation", () => {
   })
 })
 
-describe("messages-transform session isolation", () => {
-  it("injects each queued directive only into a message from the same session", async () => {
+describe("gate continuation + prompt failure (H1/H7)", () => {
+  it("does not claim block when session.prompt is missing; keeps queue for system.transform", async () => {
+    const fires: Array<{ decision: string; would_block?: boolean; reason?: string }> = []
+    const spy = vi.spyOn(measurement, "logGateFire").mockImplementation((_sid, payload) => {
+      fires.push(payload as any)
+      return {} as any
+    })
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const hooks = await ElicifyVertexPlugin({ directory: "/work", worktree: "/work" } as any, undefined)
+      const sessionID = "no-client"
+      await activate(hooks, sessionID, "deep implement the plan")
+      await hooks["tool.execute.after"]!({
+        tool: "edit",
+        sessionID,
+        callID: "edit",
+        args: { filePath: "src/index.ts" },
+      }, { title: "edit", output: "done", metadata: {} })
+      await completeText(hooks, sessionID, "Done.")
+      await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any })
+
+      expect(fires.some((f) => f.decision === "block")).toBe(false)
+      expect(fires.some((f) => f.decision === "allow" && f.would_block === true)).toBe(true)
+      expect(errSpy).toHaveBeenCalled()
+
+      const sys = { system: [] as string[] }
+      await hooks["experimental.chat.system.transform"]!({ sessionID, model: {} as any }, sys)
+      expect(sys.system.join("\n")).toContain("vertex:stop-block")
+    } finally {
+      spy.mockRestore()
+      errSpy.mockRestore()
+    }
+  })
+
+  it("on prompt throw: allow+would_block, clears continuation flag, keeps queue", async () => {
+    const fires: Array<{ decision: string; would_block?: boolean; reason?: string }> = []
+    const spy = vi.spyOn(measurement, "logGateFire").mockImplementation((_sid, payload) => {
+      fires.push(payload as any)
+      return {} as any
+    })
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const prompt = vi.fn(async () => {
+        throw new Error("prompt boom")
+      })
+      const hooks = await ElicifyVertexPlugin(pluginInput(prompt), undefined)
+      const sessionID = "prompt-fail"
+      await activate(hooks, sessionID, "deep implement the plan")
+      await hooks["tool.execute.after"]!({
+        tool: "edit",
+        sessionID,
+        callID: "edit",
+        args: { filePath: "src/index.ts" },
+      }, { title: "edit", output: "done", metadata: {} })
+      await completeText(hooks, sessionID, "Done.")
+      await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any })
+
+      expect(fires.some((f) => f.decision === "block")).toBe(false)
+      expect(fires.some((f) => f.decision === "allow" && f.reason === "session.prompt failed")).toBe(true)
+
+      // Flag cleared → next user message resets ledger (mutation evidence lost for gate).
+      await activate(hooks, sessionID, "deep implement more")
+      await completeText(hooks, sessionID, "Still done.")
+      await hooks.event!({ event: { type: "session.idle", properties: { sessionID } } as any })
+      expect(prompt).toHaveBeenCalledTimes(1)
+
+      // Queue survived the failed prompt for next system.transform (enqueued before prompt).
+      const sys = { system: [] as string[] }
+      await hooks["experimental.chat.system.transform"]!({ sessionID, model: {} as any }, sys)
+      expect(sys.system.join("\n")).toContain("vertex:stop-block")
+    } finally {
+      spy.mockRestore()
+      errSpy.mockRestore()
+    }
+  })
+
+  it("leaves continuation flag set until chat.message after successful prompt", async () => {
+    let hooks: Awaited<ReturnType<typeof ElicifyVertexPlugin>>
+    let sawContinuation = false
+    const prompt = vi.fn(async (request: any) => {
+      await hooks["chat.message"]!({ sessionID: "flag-lifetime", agent: "elicify-vertex-agent" } as any, {
+        message: {} as any,
+        parts: request.body.parts,
+      })
+      sawContinuation = true
+      return {}
+    })
+    hooks = await ElicifyVertexPlugin(pluginInput(prompt), undefined)
+    await activate(hooks, "flag-lifetime", "deep implement the plan")
+    await hooks["tool.execute.after"]!({
+      tool: "edit",
+      sessionID: "flag-lifetime",
+      callID: "edit",
+      args: { filePath: "src/index.ts" },
+    }, { title: "edit", output: "done", metadata: {} })
+    await completeText(hooks, "flag-lifetime", "Done without verify.")
+    await hooks.event!({ event: { type: "session.idle", properties: { sessionID: "flag-lifetime" } } as any })
+    expect(sawContinuation).toBe(true)
+    expect(prompt).toHaveBeenCalledTimes(1)
+
+    // Evidence still present → second idle still blocks.
+    await completeText(hooks, "flag-lifetime", "Still done.")
+    await hooks.event!({ event: { type: "session.idle", properties: { sessionID: "flag-lifetime" } } as any })
+    expect(prompt).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("system-transform directive delivery (H5)", () => {
+  it("injects each queued directive only for the matching session via system.transform", async () => {
     const hooks = await ElicifyVertexPlugin(pluginInput(), undefined)
     await activate(hooks, "s1", "fix one")
     await activate(hooks, "s2", "fix two")
     hooks.enqueue("s1", { id: "only-s1", text: "private to s1" })
     hooks.enqueue("s2", { id: "only-s2", text: "private to s2" })
-    const output = {
+
+    const out1 = { system: [] as string[] }
+    await hooks["experimental.chat.system.transform"]!({ sessionID: "s1", model: {} as any }, out1)
+    const out2 = { system: [] as string[] }
+    await hooks["experimental.chat.system.transform"]!({ sessionID: "s2", model: {} as any }, out2)
+
+    expect(out1.system.join("\n")).toContain("only-s1")
+    expect(out1.system.join("\n")).not.toContain("only-s2")
+    expect(out2.system.join("\n")).toContain("only-s2")
+    expect(out2.system.join("\n")).not.toContain("only-s1")
+  })
+
+  it("messages.transform does not drain the directive queue", async () => {
+    const hooks = await ElicifyVertexPlugin(pluginInput(), undefined)
+    await activate(hooks, "s1", "fix one")
+    hooks.enqueue("s1", { id: "keep-me", text: "must survive messages.transform" })
+
+    const messages = {
       messages: [
         { info: { id: "m1", sessionID: "s1", role: "user" } as any, parts: [] as any[] },
-        { info: { id: "m2", sessionID: "s2", role: "user" } as any, parts: [] as any[] },
       ],
     }
-    await hooks["experimental.chat.messages.transform"]!({}, output)
-    const s1 = output.messages[0].parts.map((part) => part.text).join("\n")
-    const s2 = output.messages[1].parts.map((part) => part.text).join("\n")
-    expect(s1).toContain("only-s1")
-    expect(s1).not.toContain("only-s2")
-    expect(s2).toContain("only-s2")
-    expect(s2).not.toContain("only-s1")
+    await hooks["experimental.chat.messages.transform"]!({}, messages)
+    expect(messages.messages[0].parts).toEqual([])
+
+    const sys = { system: [] as string[] }
+    await hooks["experimental.chat.system.transform"]!({ sessionID: "s1", model: {} as any }, sys)
+    expect(sys.system.join("\n")).toContain("keep-me")
   })
 
   it("preserves queued directives across compaction", async () => {

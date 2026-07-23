@@ -6,9 +6,9 @@ import {
 } from "../src/index.js"
 
 // ---------------------------------------------------------------------------
-// Promise-no-act detector — strictly better than fablize finish-the-work.sh
-// (fablize matches only future-intent phrases; we match explicit deferral
-// markers, issue-filing intent, follow-up language, and standalone "later".)
+// Promise-no-act detector — extends fablize finish-the-work.sh:59-62
+// Explicit deferral markers, issue-filing, follow-up, constrained later/
+// tracked/tracking (no bare-keyword FPs), and ask-user exemption (:64-69).
 // ---------------------------------------------------------------------------
 
 describe("detectPromiseNoAct — explicit deferral markers", () => {
@@ -40,22 +40,20 @@ describe("detectPromiseNoAct — explicit deferral markers", () => {
     expect(hits.some((h) => h.label === "explicit-deferral")).toBe(true)
   })
 
-  it("detects 'tracked' (not part of 'issue tracker' compound word)", () => {
-    // 'tracked' as a stand-alone word should hit
+  it("detects constrained 'is tracked' / 'tracked for' (not bare tracked)", () => {
     const hits = detectPromiseNoAct("Bug is tracked for next release.")
     expect(hits.some((h) => h.label === "tracked-instead-of-fixed")).toBe(true)
 
-    // 'issue-tracker' / 'issue tracking' should NOT hit (compound)
     const hits2 = detectPromiseNoAct("Filed in the issue-tracker.")
     expect(hits2.some((h) => h.label === "tracked-instead-of-fixed")).toBe(false)
   })
 
-  it("detects 'tracking' as stand-alone word", () => {
+  it("detects constrained 'still tracking'", () => {
     const hits = detectPromiseNoAct("Still tracking the flaky test.")
     expect(hits.some((h) => h.label === "tracked-instead-of-fixed")).toBe(true)
   })
 
-  it("detects 'later' (the most common trailing marker)", () => {
+  it("detects 'later' only with future intent (will/I'll … later)", () => {
     const hits = detectPromiseNoAct("Tests pass. Will add type hints later.")
     expect(hits.some((h) => h.label === "later-marker")).toBe(true)
   })
@@ -134,8 +132,7 @@ describe("detectPromiseNoAct — future-intent pattern (fablize parity)", () => 
     const hits = detectPromiseNoAct(
       "Works for now. We should optimize later.",
     )
-    // could match either 'we should' or 'later' — both valid
-    expect(hits.length).toBeGreaterThan(0)
+    expect(hits.some((h) => h.label === "we-should-X-later")).toBe(true)
   })
 
   it("detects 'I will write next'", () => {
@@ -147,6 +144,22 @@ describe("detectPromiseNoAct — future-intent pattern (fablize parity)", () => 
 })
 
 describe("detectPromiseNoAct — false-positive guards", () => {
+  it("does NOT match 'tracked down'", () => {
+    const hits = detectPromiseNoAct("I tracked down the bug and fixed it.")
+    expect(hits.filter((h) => h.label === "tracked-instead-of-fixed").length).toBe(0)
+  })
+
+  it("does NOT match 'later section' / 'see you later'", () => {
+    expect(detectPromiseNoAct("See the later section for details.")).toEqual([])
+    expect(detectPromiseNoAct("See you later.")).toEqual([])
+  })
+
+  it("does NOT match bare tracking without deferral shape", () => {
+    const hits = detectPromiseNoAct("The bug tracking ticket is closed.")
+    expect(hits.filter((h) => h.label === "tracked-instead-of-fixed").length).toBe(0)
+    expect(hits.filter((h) => h.label === "tracking").length).toBe(0)
+  })
+
   it("does NOT match 'tracked' inside 'issue tracker' (compound word)", () => {
     const hits = detectPromiseNoAct(
       "Found three stale entries in the issue tracker.",
@@ -155,27 +168,20 @@ describe("detectPromiseNoAct — false-positive guards", () => {
   })
 
   it("does NOT match standalone 'tracked' inside a hyphenated compound", () => {
-    // The hyphen keeps it inside one token. 'tracked' is part of
-    // 'issue-tracker', so it does NOT trigger.
     const hits = detectPromiseNoAct(
       "Filed in the issue-tracker.",
     )
     expect(hits.filter((h) => h.label === "tracked-instead-of-fixed").length).toBe(0)
   })
 
-  it("'time tracking' (two separate words) DOES trigger — word boundaries are real", () => {
-    // 'time' and 'tracking' are separate words separated by a space. 'tracking'
-    // is a stand-alone word, not part of a compound — so this SHOULD trigger.
-    // The earlier 'does NOT match issue tracker' test is about compound
-    // identifiers joined by '-', not about space-separated words.
+  it("does NOT match bare 'time tracking' (no constrained shape)", () => {
     const hits = detectPromiseNoAct(
       "Stopped the time tracking integration.",
     )
-    expect(hits.filter((h) => h.label === "tracked-instead-of-fixed").length).toBe(1)
+    expect(hits.filter((h) => h.label === "tracked-instead-of-fixed").length).toBe(0)
   })
 
-  it("does NOT match 'later' as part of a larger word (e.g. 'lateral', 'comply-later-violations')", () => {
-    // 'lateral' contains 'later' but not as a stand-alone word
+  it("does NOT match 'later' as part of a larger word (e.g. 'lateral')", () => {
     const hits = detectPromiseNoAct("Lateral movement of data.")
     expect(hits.filter((h) => h.label === "later-marker").length).toBe(0)
   })
@@ -221,10 +227,37 @@ describe("detectPromiseNoAct — multilingual annotations", () => {
 })
 
 describe("shouldBlockPromiseNoAct — completion state", () => {
-  it("blocks promised remaining work after file changes even if an earlier verifier passed", () => {
+  it("blocks promised remaining work after file changes when unverified", () => {
     const text = "TODO: add the missing test later."
     expect(shouldBlockPromiseNoAct(text, true)).toBe(true)
+    expect(shouldBlockPromiseNoAct(text, true, false)).toBe(true)
     expect(shouldBlockPromiseNoAct(text, false)).toBe(false)
+  })
+
+  it("blocks verified work only on STRONG labels (TODO)", () => {
+    expect(shouldBlockPromiseNoAct("TODO: add the missing test later.", true, true)).toBe(true)
+  })
+
+  it("does NOT block verified soft phrasings (see you later / tracked down)", () => {
+    expect(shouldBlockPromiseNoAct("See you later.", true, true)).toBe(false)
+    expect(shouldBlockPromiseNoAct("I tracked down the bug.", true, true)).toBe(false)
+  })
+
+  it("does NOT block when the tail asks the user (even with later)", () => {
+    expect(
+      shouldBlockPromiseNoAct(
+        "I can ship this later. Would you like me to continue?",
+        true,
+        false,
+      ),
+    ).toBe(false)
+    expect(
+      shouldBlockPromiseNoAct(
+        "Should I file an issue for the follow-up, or keep going?",
+        true,
+        false,
+      ),
+    ).toBe(false)
   })
 })
 
@@ -241,27 +274,35 @@ describe("detectPromiseNoAct — comprehensive coverage", () => {
     expect(labels).toContain("follow-up")
   })
 
+  it("still hits TODO later, I'll implement next, file an issue", () => {
+    expect(detectPromiseNoAct("TODO later").some((h) => h.label === "todo-marker")).toBe(true)
+    expect(
+      detectPromiseNoAct("I'll implement the cache next.").some((h) => h.label === "future-intent"),
+    ).toBe(true)
+    expect(
+      detectPromiseNoAct("Please file an issue for the remaining edge case.").some(
+        (h) => h.label === "issue-filing",
+      ),
+    ).toBe(true)
+  })
+
   it("PROMISE_NO_ACT_LABELS exposes the full set used by the detector", () => {
-    // Sanity: the export exists and is non-empty
     expect(PROMISE_NO_ACT_LABELS.length).toBeGreaterThan(10)
   })
 
   it("is case-insensitive", () => {
     const hits = detectPromiseNoAct(
-      "TODO: handle this LATER. Will File An Issue.",
+      "TODO: handle this. Will File An Issue.",
     )
-    expect(hits.length).toBeGreaterThanOrEqual(3)
+    expect(hits.length).toBeGreaterThanOrEqual(2)
   })
 
   it("only inspects the tail (last 600 chars)", () => {
     // TODO buried deep enough that the last-600 window doesn't reach it.
-    // We sandwich the marker between two 700-char padding blocks so the
-    // tail (last 600 chars) doesn't include the TODO.
     const padded = "x".repeat(700) + " TODO buried in middle " + "x".repeat(700)
     const hits = detectPromiseNoAct(padded)
     expect(hits.some((h) => h.label === "todo-marker")).toBe(false)
 
-    // TODO at the tail (within the last 600 chars) should trigger.
     const padded2 = "x".repeat(500) + " TODO at the tail"
     const hits2 = detectPromiseNoAct(padded2)
     expect(hits2.some((h) => h.label === "todo-marker")).toBe(true)

@@ -37,6 +37,8 @@ describe("classifyFileKind — docs-only exemption", () => {
     expect(classifyFileKind("lib/utils.rs")).toBe("code")
     expect(classifyFileKind("App.jsx")).toBe("code")
     expect(classifyFileKind("script.sh")).toBe("code")
+    // Code under docs/ is still code (not a docs-only exemption).
+    expect(classifyFileKind("docs/api/handler.ts")).toBe("code")
   })
 
   it("classifies config files as config", () => {

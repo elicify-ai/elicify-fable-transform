@@ -149,6 +149,28 @@ describe("parseVerification — masked aggregate status", () => {
     })
   })
 
+  it("does not accept bare pipe masking", () => {
+    expect(parseVerification("pytest | tee /tmp/out", "10 passed", 0)).toMatchObject({
+      outcome: "ambiguous",
+      exitCodeReliable: false,
+    })
+  })
+
+  it("accepts shell redirections (2>&1 / >file) without treating them as background", () => {
+    expect(parseVerification("npm test 2>&1", "12 passed", 0)).toMatchObject({
+      outcome: "verified",
+      exitCodeReliable: true,
+    })
+    expect(parseVerification("tsc --noEmit 2>&1", "", 0)).toMatchObject({
+      outcome: "verified",
+      exitCodeReliable: true,
+    })
+    expect(parseVerification("npm test >/tmp/o 2>&1", "12 passed", 0)).toMatchObject({
+      outcome: "verified",
+      exitCodeReliable: true,
+    })
+  })
+
   it("accepts an AND-chained follow-up because verifier failure stops the chain", () => {
     expect(parseVerification("pytest && echo done", "10 passed\ndone", 0)).toMatchObject({
       outcome: "verified",

@@ -179,6 +179,8 @@ export interface GateFirePayload extends EventPayload {
   stop_blocks: number
   max_stop_blocks: number
   would_block: boolean
+  /** Why a block was not enforced (missing client, prompt failure, etc.). */
+  reason?: string
 }
 
 export interface RecoveryRepeatPayload extends EventPayload {

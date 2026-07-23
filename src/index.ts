@@ -8,13 +8,12 @@
  *   chat.message                        — session gate (activate/deactivate)
  *   tool.execute.after                  — READ PATH: observe tools, record evidence
  *   experimental.chat.system.transform  — INJECT PATH: directives + signal routing
- *   experimental.chat.messages.transform — fallback injection
+ *   experimental.chat.messages.transform — present but does not drain queue (H5)
  *   event(session.idle)                 — STOP GATE: block unverified completion
  *
  * @see https://opencode.ai/docs/plugins/
  */
 
-import { randomUUID } from "node:crypto"
 import { appendFileSync, chmodSync } from "node:fs"
 import { tool, type Hooks, type PluginInput, type PluginOptions } from "@opencode-ai/plugin"
 import {
@@ -28,17 +27,9 @@ import {
   logGateFire,
   logHoldoutSuppress,
   logRecoveryRepeat,
+  type GateFirePayload,
 } from "./measurement.js"
 import { redactSecrets } from "./redaction.js"
-
-type TextPart = {
-  id: string
-  type: "text"
-  text: string
-  sessionID: string
-  messageID: string
-  synthetic?: boolean
-}
 
 // ===========================================================================
 // PUBLIC TYPES
@@ -123,7 +114,6 @@ interface SessionLedger {
   /** Set per-prompt to the classified mode (quick/normal/deep) — mirrors fablize gate_prompt.py:24-33 */
   taskMode: "quick" | "normal" | "deep"
   riskFlags: Set<RiskFlag>
-  verificationCommands: string[]
   verificationResults: Array<{ command: string; exitCode: number; success: boolean }>
   failures: Array<{ signature: string; timestamp: string }>
   stopBlocks: number
@@ -144,17 +134,11 @@ export class EvidenceLedger {
       changedFileKinds: new Set(),
       taskMode: mode,
       riskFlags: new Set(risks),
-      verificationCommands: [],
       verificationResults: [],
       failures: [],
       stopBlocks: 0,
       promiseBlocks: 0,
     })
-  }
-
-  setMode(sessionID: string, mode: "quick" | "normal" | "deep"): void {
-    const l = this.ledgers.get(sessionID)
-    if (l) l.taskMode = mode
   }
 
   recordChangedFiles(sessionID: string, filePath: string): void {
@@ -167,7 +151,6 @@ export class EvidenceLedger {
   recordVerification(sessionID: string, command: string, exitCode: number, success: boolean): void {
     const l = this.ledgers.get(sessionID)
     if (!l) return
-    l.verificationCommands.push(command)
     l.verificationResults.push({ command, exitCode, success })
   }
 
@@ -208,7 +191,6 @@ export class EvidenceLedger {
         changedFileKinds: new Set(),
         taskMode: "normal",
         riskFlags: new Set(),
-        verificationCommands: [],
         verificationResults: [],
         failures: [],
         stopBlocks: 0,
@@ -293,28 +275,51 @@ const CONFIG_EXTENSIONS = new Set([".json", ".yaml", ".yml", ".toml", ".ini", ".
 export function classifyFileKind(filePath: string): "docs" | "code" | "config" | "other" {
   if (!filePath) return "other"
   const lower = filePath.toLowerCase()
-  const pathParts = lower.split(/[\\/]+/)
-  if (pathParts.includes("docs")) return "docs"
   // Extract the basename (last path segment) to handle both "README.md" and
   // "README" (no extension) correctly.
   const slash = lower.lastIndexOf("/")
   const basename = slash === -1 ? lower : lower.slice(slash + 1)
   const dot = basename.lastIndexOf(".")
+  if (dot !== -1) {
+    const ext = basename.slice(dot)
+    // Code under a docs/ path (e.g. docs/api/handler.ts) is still code.
+    if (CODE_EXTENSIONS.has(ext)) return "code"
+    if (DOC_EXTENSIONS.has(ext)) return "docs"
+    if (CONFIG_EXTENSIONS.has(ext)) {
+      const pathParts = lower.split(/[\\/]+/)
+      if (pathParts.includes("docs")) return "docs"
+      return "config"
+    }
+  }
+  const pathParts = lower.split(/[\\/]+/)
+  if (pathParts.includes("docs")) return "docs"
   if (dot === -1) {
-    // no extension — check doc basenames
     if (DOC_BASENAMES.has(basename)) return "docs"
     return "other"
   }
-  const ext = basename.slice(dot)
-  if (DOC_EXTENSIONS.has(ext)) return "docs"
-  if (CODE_EXTENSIONS.has(ext)) return "code"
-  if (CONFIG_EXTENSIONS.has(ext)) return "config"
   return "other"
 }
 
-const MUTATING_BASH_RE = /\b(?:apply_patch|chmod|mkdir|mv|cp|rm|touch|install|ln|truncate|tee)\b|\b(?:sed\s+-i|perl\s+-pi)\b|\bgit\s+(?:checkout|restore|reset|clean|apply|am|merge|rebase|cherry-pick)\b|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b|(?:^|\s)--(?:write|fix)\b|(?:^|[\s;])\d?>>?\s*\S+/i
+// Core filesystem / SCM mutators. Redirect-to-file is handled separately so
+// stderr/stdout fd duplication (`2>&1`, `>&2`) is never treated as a write.
+const MUTATING_BASH_RE = /\b(?:apply_patch|chmod|mkdir|mv|cp|rm|touch|install|ln|truncate|tee)\b|\b(?:sed\s+-i|perl\s+-pi)\b|\bgit\s+(?:add|commit|checkout|restore|reset|clean|apply|am|merge|rebase|cherry-pick)\b|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b|(?:^|\s)--(?:write|fix)\b/i
+/** `echo/printf/cat … > file` or `>> file` — not `2>&1` / `>&2` / `n>&m`. */
+const SHELL_FILE_REDIRECT_RE = /(?:^|[\s;|&])(?:\d*)>>(?!&)\s*\S+|(?:^|[\s;|&])(?:\d*)>(?!>|&)\s*\S+/
+/** python/python3 -c with open(...).write / writelines or write-mode open. */
+const PYTHON_INLINE_WRITE_RE = /\bpython(?:3(?:\.\d+)?)?\s+-c\s+[\s\S]*(?:\bopen\s*\([^)]*\)\s*\.\s*(?:write|writelines)\b|\bopen\s*\([^)]*['"](?:w|a|x|r\+)[^'"]*['"][^)]*\))/i
+/** node -e / node -p with writeFile(Sync)/appendFile(Sync)/createWriteStream. */
+const NODE_INLINE_WRITE_RE = /\bnode\s+-[ep]\s+[\s\S]*\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream)\b/i
 
-function changedPathsFromTool(toolName: string, args: Record<string, unknown>): string[] {
+/** True when a bash command is likely to mutate the workspace. */
+export function isMutatingBashCommand(command: string): boolean {
+  if (!command) return false
+  return MUTATING_BASH_RE.test(command)
+    || SHELL_FILE_REDIRECT_RE.test(command)
+    || PYTHON_INLINE_WRITE_RE.test(command)
+    || NODE_INLINE_WRITE_RE.test(command)
+}
+
+export function changedPathsFromTool(toolName: string, args: Record<string, unknown>): string[] {
   const normalized = toolName.toLowerCase()
   const directPath = typeof args.filePath === "string"
     ? args.filePath
@@ -336,31 +341,32 @@ function changedPathsFromTool(toolName: string, args: Record<string, unknown>): 
   }
   if (normalized === "bash") {
     const command = typeof args.command === "string" ? args.command : ""
-    if (MUTATING_BASH_RE.test(command)) return ["bash-mutation"]
+    if (isMutatingBashCommand(command)) return ["bash-mutation"]
   }
   return []
 }
 
 // ===========================================================================
-// PROMISE-NO-ACT DETECTOR — strictly better than fablize finish-the-work.sh
+// PROMISE-NO-ACT DETECTOR (extends fablize finish-the-work.sh)
 // ===========================================================================
-// fablize detects only future-intent phrases like "I'll do X next":
-//   /tmp/fablize-deep/hooks/finish-the-work.sh:48-53
+// fablize detects future-intent phrases like "I'll do X next":
+//   finish-the-work.sh:59-62
+// and exempts ask-the-user tails (finish-the-work.sh:64-69).
 // We additionally catch:
-//   - explicit deferral markers: TODO, FIXME, XXX, deferred, tracked
-//   - issue-filing intent: "file an issue", "track this"
-//   - follow-up language: "follow up", "in a follow", "for tracking"
-//   - the word "later" (common trailing-future marker)
-// All case-insensitive. Triggers on the closing 600 chars of the last
-// assistant message (fablize uses last 400; we use 600 for more headroom).
+//   - explicit deferral markers: TODO, FIXME, XXX, deferred
+//   - issue-filing intent: "file an issue", "I'll file"
+//   - follow-up language: "follow up", "in a follow", "next iteration"
+//   - constrained tracked/tracking (not "tracked down", "bug tracking")
+//   - "later" only with future intent (will/I'll/going to … later; we should)
+// Bare "later"/"tracked"/"tracking" alone are NOT needles (FP risk on
+// "see you later", "tracked down", "later section", "tracking is closed").
+// Tail window: last 600 chars. Blocking policy: see shouldBlockPromiseNoAct.
 // ----------------------------------------------------------------------------
 
 export type PromiseLocale = "en" | "ko"
 
 const PROMISE_NO_ACT_KEYWORDS: readonly { needle: string; label: string; locale: PromiseLocale }[] = [
   { needle: "deferred", label: "explicit-deferral", locale: "en" },
-  { needle: "tracked", label: "tracked-instead-of-fixed", locale: "en" },
-  { needle: "tracking", label: "tracked-instead-of-fixed", locale: "en" },
   { needle: "file an issue", label: "issue-filing", locale: "en" },
   { needle: "i'll file", label: "issue-filing", locale: "en" },
   { needle: "follow up", label: "follow-up", locale: "en" },
@@ -368,7 +374,6 @@ const PROMISE_NO_ACT_KEYWORDS: readonly { needle: string; label: string; locale:
   { needle: "todo", label: "todo-marker", locale: "en" },
   { needle: "fixme", label: "fixme-marker", locale: "en" },
   { needle: "xxx", label: "xxx-marker", locale: "en" },
-  { needle: "later", label: "later-marker", locale: "en" },
   { needle: "next iteration", label: "next-iteration", locale: "en" },
   { needle: "in a follow", label: "follow-up", locale: "en" },
   { needle: "for tracking purposes", label: "tracking", locale: "en" },
@@ -383,9 +388,8 @@ const PROMISE_NO_ACT_KEYWORDS: readonly { needle: string; label: string; locale:
   { needle: "추적하겠습니다", label: "tracked-instead-of-fixed", locale: "ko" },
 ]
 
-// Future-intent patterns preserve fablize's verb-followed form and add the
-// explicit forms requested by the parity goal without matching harmless
-// phrases such as "let me know" or "we should be done".
+// Constrained patterns — not bare keywords — plus fablize verb-followed form.
+// Avoids FPs on "tracked down", "later section", "see you later", "tracking ticket".
 const PROMISE_INTENT_PATTERNS: readonly { pattern: RegExp; label: string; locale: PromiseLocale }[] = [
   {
     pattern: /\b(I'?ll|I will|let me|next,?\s*I|now\s*I'?ll)\b[^.!?\n]{0,80}\b(now|next|then|implement|create|write|add|run|fix|save|build|start|proceed|address|handle|investigate|review)\b/i,
@@ -398,11 +402,42 @@ const PROMISE_INTENT_PATTERNS: readonly { pattern: RegExp; label: string; locale
     locale: "en",
   },
   {
+    // later only with future intent (bare "later" is not a needle)
+    pattern: /\b(?:will|i'?ll|i will|we'?ll|we will|going to)\b[^.!?\n]{0,100}\blater\b/i,
+    label: "later-marker",
+    locale: "en",
+  },
+  {
+    // "is/are/been tracked", "tracked for" — not "tracked down"
+    pattern: /\b(?:is|are|been)\s+tracked\b(?!\s+down\b)|\btracked\s+for\b/i,
+    label: "tracked-instead-of-fixed",
+    locale: "en",
+  },
+  {
+    // "still tracking", "tracking this/the/it/for" — not bare "tracking"
+    pattern: /\bstill\s+tracking\b|\btracking\s+(?:this|the|it|for)\b/i,
+    label: "tracked-instead-of-fixed",
+    locale: "en",
+  },
+  {
     pattern: /(?:다음에|나중에)[^.!?\n]{0,80}(?:하겠습니다|진행하겠습니다|처리하겠습니다)/u,
     label: "future-intent",
     locale: "ko",
   },
 ]
+
+/** Labels that still block after external verification (strong deferrals). */
+const STRONG_PROMISE_LABELS = new Set([
+  "todo-marker",
+  "fixme-marker",
+  "xxx-marker",
+  "explicit-deferral",
+  "issue-filing",
+  "future-intent",
+  "we-should-X-later",
+  "next-iteration",
+  "follow-up",
+])
 
 export interface PromiseHit {
   label: string
@@ -416,13 +451,11 @@ export interface PromiseHit {
  * Scan assistant text for promise-no-act signals. Returns ALL hits (not just
  * the first) so callers can log them out-of-band for measurement.
  *
- * Strictly better than fablize finish-the-work.sh:54 because:
- *   - We match explicit deferral markers (TODO/FIXME/XXX/deferred/tracked)
- *     that fablize's regex cannot match.
- *   - We match issue-filing intent ("file an issue") that fablize ignores.
- *   - We match the standalone word "later" — the most common trailing marker.
- *   - We still keep fablize's verb-followed pattern for parity.
- *   - Returns structured hits, not a boolean — enables measurement.
+ * Extends fablize finish-the-work.sh:59-62 with:
+ *   - Explicit deferral markers (TODO/FIXME/XXX/deferred)
+ *   - Issue-filing intent ("file an issue")
+ *   - Constrained later/tracked/tracking patterns (no bare-keyword FPs)
+ *   - Structured hits for measurement (not a boolean)
  */
 export function detectPromiseNoAct(text: string): PromiseHit[] {
   if (!text) return []
@@ -439,8 +472,7 @@ export function detectPromiseNoAct(text: string): PromiseHit[] {
       // larger token. We treat alphanumeric AND "-" AND "_" as in-word
       // (compound identifiers like "issue-tracker", "time_tracking" do NOT
       // match — they are compound words, not standalone deferral markers).
-      // Punctuation like ".", ",", "!", "?", ";", ":" counts as a boundary,
-      // so "Will do this later." still matches.
+      // Punctuation like ".", ",", "!", "?", ";", ":" counts as a boundary.
       const before = pos > 0 ? lower[pos - 1] : ""
       const after = pos + needle.length < lower.length ? lower[pos + needle.length] : ""
       const inWord = (c: string) => /[\p{L}\p{N}_-]/u.test(c)
@@ -475,18 +507,41 @@ export function detectPromiseNoAct(text: string): PromiseHit[] {
 }
 
 /**
+ * fablize finish-the-work.sh:64-69 — do not block when the tail is asking the
+ * user a question or offering a choice rather than promising unfinished work.
+ */
+function asksUser(text: string): boolean {
+  const tail = text.slice(-600).toLowerCase()
+  return /\?|shall i\b|would you like\b|do you want\b|let me know\b|which option\b/i.test(tail)
+}
+
+/**
  * The user's instruction explicitly listed these as "indications". They are
  * already covered above; this export exists so callers and tests can see
  * the full set in one place.
  */
-export const PROMISE_NO_ACT_LABELS = PROMISE_NO_ACT_KEYWORDS.map((k) => k.label)
+export const PROMISE_NO_ACT_LABELS = [
+  ...PROMISE_NO_ACT_KEYWORDS.map((k) => k.label),
+  ...PROMISE_INTENT_PATTERNS.map((p) => p.label),
+]
 
-/** Promise-no-act blocks only unfinished work: changed files, no successful
- * verification, and a deferral signal in the final assistant message. */
-export function shouldBlockPromiseNoAct(text: string, changed: boolean): boolean {
-  // A promise to do remaining work is itself evidence that completion is not
-  // verified; an earlier successful command cannot verify work not yet done.
-  return changed && detectPromiseNoAct(text).length > 0
+/**
+ * Promise-no-act gate policy:
+ *   - !changed → never block
+ *   - asks-user tail → never block
+ *   - no hits → never block
+ *   - unverified → any hit blocks
+ *   - verified → only STRONG labels block (TODO/FIXME/XXX/deferral/issue/
+ *     future-intent/we-should-X-later/next-iteration/follow-up). Weak hits
+ *     alone (e.g. constrained later-marker, tracked-instead-of-fixed) do not.
+ */
+export function shouldBlockPromiseNoAct(text: string, changed: boolean, verified = false): boolean {
+  if (!changed) return false
+  if (asksUser(text)) return false
+  const hits = detectPromiseNoAct(text)
+  if (hits.length === 0) return false
+  if (!verified) return true
+  return hits.some((h) => STRONG_PROMISE_LABELS.has(h.label))
 }
 
 // ===========================================================================
@@ -744,14 +799,27 @@ function unwrapTopLevelShellCommand(command: string): string {
   return wrapped ? wrapped[2] : command
 }
 
+/** Strip shell redirections so operators inside them are not mistaken for
+ * background `&` or bare pipes (`npm test 2>&1`, `cmd >/tmp/o 2>&1`). */
+function stripShellRedirections(command: string): string {
+  return command
+    .replace(/\d*>&\d+/g, " ") // 2>&1, >&2, 1>&2
+    .replace(/&>/g, " ") // &>file
+    .replace(/>>\s*\S+/g, " ") // >>file
+    .replace(/(?<![>&])>\s*\S+/g, " ") // >file (not part of >> or &>)
+}
+
 function hasReliableAggregateExit(command: string, segments: string[], verifierIndexes: number[]): boolean {
-  if (/\|\||(?<!\|)\|(?!\|)|(?<!&)&(?!&)/.test(command)) return false
+  // Test masks on the redirection-stripped form so `2>&1` is not treated as
+  // background `&`. Still unreliable: `||`, bare `|`, bare `&`, trailing maskers.
+  const bare = stripShellRedirections(command)
+  if (/\|\||(?<!\|)\|(?!\|)|(?<!&)&(?!&)/.test(bare)) return false
   if (verifierIndexes.length === 0) return false
   const lastVerifier = verifierIndexes[verifierIndexes.length - 1]
   if (lastVerifier === segments.length - 1) return true
   // `verifier && follow-up` is reliable: the follow-up cannot run after a
   // verifier failure. Semicolon/newline composition can mask that failure.
-  const normalized = command.replace(/\s+/g, " ")
+  const normalized = bare.replace(/\s+/g, " ")
   return normalized.includes("&&") && !/[;\n]/.test(command)
 }
 
@@ -827,24 +895,24 @@ export const ElicifyVertexPlugin = async (
   const gate = new SessionGate()
   const ledger = new EvidenceLedger()
   const verificationReceipts = new VerificationReceiptStore()
+  const defaultRoot = input.worktree || input.directory || process.cwd()
   const goalRootsBySession = new Map<string, string>()
 
   const goalEngine = (context: { sessionID: string; directory: string; worktree: string }) => {
-    const root = context.worktree || context.directory
+    const root = context.worktree || context.directory || defaultRoot
     goalRootsBySession.set(context.sessionID, root)
     return new MultiStoryGoalEngine(root)
   }
 
   // Last-seen task classification per session (for signal routing).
   const taskModeBySession = new Map<string, TaskMode>()
-  const stopModeBySession = new Map<string, StopModeResult>()
   const reviewBySession = new Map<string, boolean>()
   const commandActivatedSessions = new Set<string>()
   const gateContinuationSessions = new Set<string>()
   const compactingSessions = new Set<string>()
 
   // Last assistant text per session (for the promise-no-act guard).
-  // Populated by experimental.chat.messages.transform; read by event(session.idle).
+  // Populated by experimental.text.complete; read by event(session.idle).
   const lastAssistantText = new Map<string, string>()
 
   // Debug logging
@@ -858,11 +926,59 @@ export const ElicifyVertexPlugin = async (
         mode: 0o600,
       })
       chmodSync(debugLog, 0o600)
-    } catch {}
+    } catch (err) {
+      console.error("[vertex] debug log", err)
+    }
   }
   debug("plugin loaded — debug mode enabled")
 
   const alwaysOn = () => opts.systemDirectives().map((d) => ({ ...d }))
+
+  /**
+   * Re-prompt after a gate decision. decision:"block" is only logged when prompt
+   * actually runs. Missing/failed prompt → allow+would_block; queue already holds
+   * the reason for system.transform. Continuation flag remains until chat.message
+   * consumes it on success; cleared on prompt failure so next user turn resets.
+   */
+  const attemptGateContinuation = async (
+    sid: string,
+    reason: string,
+    payload: Omit<GateFirePayload, "decision">,
+  ): Promise<void> => {
+    // GateFirePayload extends Record<string, unknown>; spread+Omit does not
+    // preserve known keys under tsc — copy fields explicitly.
+    const fire = (
+      decision: GateFirePayload["decision"],
+      extra?: { reason?: string },
+    ): void => {
+      logGateFire(sid, {
+        decision,
+        changed: Boolean(payload.changed),
+        verified: Boolean(payload.verified),
+        stop_blocks: Number(payload.stop_blocks),
+        max_stop_blocks: Number(payload.max_stop_blocks),
+        would_block: Boolean(payload.would_block),
+        ...(extra?.reason !== undefined ? { reason: extra.reason } : {}),
+      })
+    }
+    if (!client?.session?.prompt) {
+      console.error("[vertex] session.prompt unavailable; cannot enforce stop gate")
+      fire("allow", { reason: "session.prompt unavailable" })
+      return
+    }
+    gateContinuationSessions.add(sid)
+    try {
+      await client.session.prompt({
+        path: { id: sid },
+        body: { parts: [{ type: "text", text: reason }] },
+      })
+      fire("block")
+    } catch (err) {
+      console.error("[vertex] session.prompt", err)
+      gateContinuationSessions.delete(sid)
+      fire("allow", { reason: "session.prompt failed" })
+    }
+  }
 
   return {
     // ── TOOLS: persistent multi-story goal engine ─────────────────────────
@@ -998,13 +1114,13 @@ verify before claiming done, control things manually, communicate calmly.`,
         const activatedByCommand = commandActivatedSessions.has(msgInput.sessionID)
         if (agent === opts.activeAgent || triggerRe.test(text) || activatedByCommand || gateContinuation) {
           gate.activate(msgInput.sessionID)
+          goalRootsBySession.set(msgInput.sessionID, goalRootsBySession.get(msgInput.sessionID) ?? defaultRoot)
           if (gateContinuation) {
             debug(`chat.message: CONTINUATION session ${msgInput.sessionID} (ledger preserved)`)
             return
           }
           const sigMode = classifyStopMode(text)
           ledger.reset(msgInput.sessionID, sigMode.mode, sigMode.risks)
-          stopModeBySession.set(msgInput.sessionID, sigMode)
           const mode = classifyTask(text)
           taskModeBySession.set(msgInput.sessionID, mode)
           const review = isReviewTask(text)
@@ -1021,7 +1137,9 @@ verify before claiming done, control things manually, communicate calmly.`,
           gate.deactivate(msgInput.sessionID)
           debug(`chat.message: DEACTIVATED session ${msgInput.sessionID} (agent=${agent})`)
         }
-      } catch {}
+      } catch (err) {
+        console.error("[vertex] chat.message", err)
+      }
     },
 
     // ── ENQUEUE: public API for other hooks/plugins ────────────────────────
@@ -1051,22 +1169,22 @@ verify before claiming done, control things manually, communicate calmly.`,
 
         // Goal receipts work independently of the session directive gate: the
         // config-hook goal commands can be used from any primary agent.
+        // Mint even when no goal tool has run yet — bind the plugin default root.
         if (verification?.outcome === "verified" && exitCode === 0) {
-          const workspaceRoot = goalRootsBySession.get(sid)
-          if (workspaceRoot) {
-            const receipt = verificationReceipts.record({
-              sessionID: sid,
-              workspaceRoot,
-              command,
-              exitCode: 0,
-              outcome: "verified",
-              outputSummary: out,
-              observedAt: new Date().toISOString(),
-            })
-            const receiptText = `[vertex:verification-receipt] ${receipt.id}`
-            toolOutput.output = `${out}${out && !out.endsWith("\n") ? "\n" : ""}${receiptText}`
-            toolOutput.metadata = { ...meta, vertexVerificationReceiptId: receipt.id }
-          }
+          const workspaceRoot = goalRootsBySession.get(sid) ?? defaultRoot
+          goalRootsBySession.set(sid, workspaceRoot)
+          const receipt = verificationReceipts.record({
+            sessionID: sid,
+            workspaceRoot,
+            command,
+            exitCode: 0,
+            outcome: "verified",
+            outputSummary: out,
+            observedAt: new Date().toISOString(),
+          })
+          const receiptText = `[vertex:verification-receipt] ${receipt.id}`
+          toolOutput.output = `${out}${out && !out.endsWith("\n") ? "\n" : ""}${receiptText}`
+          toolOutput.metadata = { ...meta, vertexVerificationReceiptId: receipt.id }
         }
 
         if (!gate.isActive(sid)) return
@@ -1113,12 +1231,13 @@ verify before claiming done, control things manually, communicate calmly.`,
             }
           }
         }
-      } catch (e) {
-        debug(`tool.after: error — ${(e as Error).message}`)
+      } catch (err) {
+        console.error("[vertex] tool.execute.after", err)
       }
     },
 
     // ── SYSTEM.TRANSFORM: the INJECT PATH (signal-routed + evidence-aware)
+    // Sole consumer of DirectiveQueue.drain (H5).
     async "experimental.chat.system.transform"(sysInput, sysOutput) {
       const sid = sysInput.sessionID
       if (!sid || !gate.isActive(sid)) {
@@ -1137,9 +1256,9 @@ verify before claiming done, control things manually, communicate calmly.`,
 
       if (reviewBySession.get(sid)) combined.push(contextForReview())
 
-      const stopMode = stopModeBySession.get(sid)
+      const stopMode = ledger.getMode(sid)
       if (stopMode) {
-        const guidance = contextForStopMode(stopMode)
+        const guidance = contextForStopMode({ mode: stopMode, risks: ledger.getRiskFlags(sid) })
         if (guidance) combined.push(guidance)
       }
 
@@ -1162,28 +1281,13 @@ verify before claiming done, control things manually, communicate calmly.`,
       debug(`system.transform: INJECTED ${combined.length} directive(s) into ${sid} (mode=${mode || "none"}, queued=${queued.length})`)
     },
 
-    // ── MESSAGES.TRANSFORM: session-isolated fallback injection ──────────
+    // ── MESSAGES.TRANSFORM: intentionally does NOT drain DirectiveQueue (H5).
+    // system.transform is the only queue consumer so stop/fail directives are
+    // not stolen by a messages path that races first.
     ...(opts.wireMessagesTransform
       ? {
-          async "experimental.chat.messages.transform"(_msgInput, msgOutput) {
-            const sessionIDs = new Set(msgOutput.messages.map((message) => message.info.sessionID))
-            for (const sessionID of sessionIDs) {
-              if (!gate.isActive(sessionID) || compactingSessions.has(sessionID)) continue
-              const directives = queue.drain(sessionID)
-              const block = formatDirectives(directives)
-              if (!block) continue
-              const target = [...msgOutput.messages].reverse().find((message) => message.info.sessionID === sessionID)
-              if (!target) continue
-              const part: TextPart = {
-                id: `prt_${randomUUID().replace(/-/g, "")}`,
-                type: "text",
-                text: `\n\n${block}\n`,
-                synthetic: true,
-                sessionID,
-                messageID: target.info.id,
-              }
-              target.parts.push(part)
-            }
+          async "experimental.chat.messages.transform"() {
+            /* no-op: do not drain */
           },
         }
       : {}),
@@ -1206,10 +1310,14 @@ verify before claiming done, control things manually, communicate calmly.`,
           return
         }
         if (event.type === "file.edited") {
-          for (const sessionID of goalRootsBySession.keys()) verificationReceipts.invalidate(sessionID)
+          // Only attribute (and invalidate receipts) when a single session is
+          // active — multi-active has no reliable session attribution, matching
+          // ledger non-attribution. Do not broadcast-invalidate all sessions.
           const activeSessions = gate.activeSessionIDs()
           if (activeSessions.length === 1) {
-            ledger.recordChangedFiles(activeSessions[0], event.properties.file)
+            const sessionID = activeSessions[0]
+            verificationReceipts.invalidate(sessionID)
+            ledger.recordChangedFiles(sessionID, event.properties.file)
           }
           return
         }
@@ -1220,14 +1328,14 @@ verify before claiming done, control things manually, communicate calmly.`,
 
         debug(`event: session.idle for ${sid}`)
 
-        // ── PROMISE-NO-ACT GUARD — strictly better than fablize ──────────
-        // Catch deferred/tracked/TODO/FIXME/issue-filing language in the final
-        // assistant message. Only blocks when files were changed this turn
-        // (so a pure "let me explain" message is allowed to end).
+        // ── PROMISE-NO-ACT GUARD (extends fablize finish-the-work.sh) ────
+        // Catch strong deferral/TODO/FIXME/issue-filing (and weak later/
+        // tracked when unverified) in the final assistant message. Only
+        // blocks when files were changed (pure Q&A / ask-user ends freely).
         const lastText = lastAssistantText.get(sid)
         if (lastText) {
           const hits = detectPromiseNoAct(lastText)
-          if (shouldBlockPromiseNoAct(lastText, ledger.hasChangedFiles(sid))) {
+          if (shouldBlockPromiseNoAct(lastText, ledger.hasChangedFiles(sid), ledger.hasVerification(sid))) {
             const labels = hits.map((h) => h.label).join(", ")
             const reason = `[vertex:promise-no-act] Your last message contains deferral/intent language (${labels}) but files were changed this turn. Either complete the work now or explicitly state what remains unverified. Promise without act is not allowed when files are changed.`
             debug(`event: ${sid} — PROMISE-NO-ACT (${labels})`)
@@ -1264,26 +1372,14 @@ verify before claiming done, control things manually, communicate calmly.`,
                 return
               }
               queue.enqueue(sid, { id: "vertex:promise-no-act", text: reason })
-              logGateFire(sid, {
-                decision: "block",
+              debug(`event: ${sid} — PROMISE-NO-ACT BLOCK ${count}/${cap}`)
+              await attemptGateContinuation(sid, reason, {
                 changed: true,
                 verified: ledger.hasVerification(sid),
                 stop_blocks: count,
                 max_stop_blocks: cap,
                 would_block: true,
               })
-              debug(`event: ${sid} — PROMISE-NO-ACT BLOCK ${count}/${cap}`)
-              if (client?.session?.prompt) {
-                gateContinuationSessions.add(sid)
-                try {
-                  await client.session.prompt({
-                    path: { id: sid },
-                    body: { parts: [{ type: "text", text: reason }] },
-                  })
-                } finally {
-                  gateContinuationSessions.delete(sid)
-                }
-              }
               return
             }
           }
@@ -1345,32 +1441,17 @@ verify before claiming done, control things manually, communicate calmly.`,
         const reason = `[vertex:stop-block] You appear to be stopping, but files were changed this turn without an observed successful allowlisted verification command. Run the narrowest relevant test, lint, typecheck, build, check, validate, verify, or HTTP probe now and cite its result, or explicitly state what remains unverified. (Block ${count}/${opts.maxStopBlocks})`
 
         queue.enqueue(sid, { id: "vertex:stop-block", text: reason })
-        logGateFire(sid, {
-          decision: "block",
+        debug(`event: ${sid} — STOP BLOCK ${count}/${opts.maxStopBlocks} (changed files, no verification)`)
+
+        await attemptGateContinuation(sid, reason, {
           changed: ledger.hasChangedFiles(sid),
           verified: ledger.hasVerification(sid),
           stop_blocks: count,
           max_stop_blocks: opts.maxStopBlocks,
           would_block: true,
         })
-        debug(`event: ${sid} — STOP BLOCK ${count}/${opts.maxStopBlocks} (changed files, no verification)`)
-
-        // Re-prompt the model to continue
-        if (client?.session?.prompt) {
-          gateContinuationSessions.add(sid)
-          try {
-            await client.session.prompt({
-              path: { id: sid },
-              body: {
-                parts: [{ type: "text", text: reason }],
-              },
-            })
-          } finally {
-            gateContinuationSessions.delete(sid)
-          }
-        }
-      } catch (e) {
-        debug(`event: error — ${(e as Error).message}`)
+      } catch (err) {
+        console.error("[vertex] event", err)
       }
     },
   }
