@@ -1,5 +1,5 @@
 ---
-name: elicify-vertex
+name: vertex
 description: Inject harness directives into the LLM input via the official opencode chat.system.transform and chat.messages.transform hooks. The correct, SDK-native place to add post-tool evidence, loop reminders, and per-session instructions — instead of stamping tool output. Use when wiring a verification/contract block, a stop-block reminder, or any per-session directive that should reach the LLM as a system instruction rather than as part of a tool reply. Triggers on phrases like "add a verification reminder to the LLM", "inject a contract block into the system prompt", or when the elicify-vertex plugin is loaded and a Stop/PostToolUse hook needs to enqueue a directive.
 ---
 
