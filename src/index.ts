@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { appendFileSync } from "node:fs"
+import { appendFileSync, chmodSync } from "node:fs"
 import type { Hooks, PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import {
   holdoutSuppresses,
@@ -24,6 +24,7 @@ import {
   logHoldoutSuppress,
   logRecoveryRepeat,
 } from "./measurement.js"
+import { redactSecrets } from "./redaction.js"
 
 type TextPart = {
   id: string
@@ -120,6 +121,7 @@ interface SessionLedger {
   changedFileKinds: Set<string>
   /** Set per-prompt to the classified mode (quick/normal/deep) — mirrors fablize gate_prompt.py:24-33 */
   taskMode: "quick" | "normal" | "deep"
+  riskFlags: Set<RiskFlag>
   verificationCommands: string[]
   verificationResults: Array<{ command: string; exitCode: number; success: boolean }>
   failures: Array<{ signature: string; timestamp: string }>
@@ -130,11 +132,16 @@ export class EvidenceLedger {
   private readonly ledgers = new Map<string, SessionLedger>()
 
   /** Reset per-turn state (called on each new user message). */
-  reset(sessionID: string, mode: "quick" | "normal" | "deep" = "normal"): void {
+  reset(
+    sessionID: string,
+    mode: "quick" | "normal" | "deep" = "normal",
+    risks: readonly RiskFlag[] = [],
+  ): void {
     this.ledgers.set(sessionID, {
       changedFilesSeen: false,
       changedFileKinds: new Set(),
       taskMode: mode,
+      riskFlags: new Set(risks),
       verificationCommands: [],
       verificationResults: [],
       failures: [],
@@ -197,6 +204,7 @@ export class EvidenceLedger {
         changedFilesSeen: false,
         changedFileKinds: new Set(),
         taskMode: "normal",
+        riskFlags: new Set(),
         verificationCommands: [],
         verificationResults: [],
         failures: [],
@@ -218,9 +226,10 @@ export class EvidenceLedger {
     if (!l) return null
     const verified = l.verificationResults.filter((v) => v.success).length
     const failed = l.verificationResults.filter((v) => !v.success).length
-    if (verified === 0 && failed === 0 && !l.changedFilesSeen) return null
+    if (verified === 0 && failed === 0 && !l.changedFilesSeen && l.riskFlags.size === 0) return null
     const parts: string[] = []
     if (l.changedFilesSeen) parts.push("files changed: yes")
+    if (l.riskFlags.size > 0) parts.push(`risks: ${[...l.riskFlags].join(", ")}`)
     if (verified > 0) parts.push(`verified: ${verified}`)
     if (failed > 0) parts.push(`failed: ${failed}`)
     return parts.join(" · ")
@@ -244,6 +253,10 @@ export class EvidenceLedger {
 
   getMode(sessionID: string): "quick" | "normal" | "deep" | null {
     return this.ledgers.get(sessionID)?.taskMode ?? null
+  }
+
+  getRiskFlags(sessionID: string): RiskFlag[] {
+    return [...(this.ledgers.get(sessionID)?.riskFlags ?? [])]
   }
 }
 
@@ -473,17 +486,33 @@ export interface StopModeResult {
   risks: RiskFlag[]
 }
 
+/** Detect only stable enum flags; raw prompt fragments are never persisted.
+ * This extends fablize's English/Korean patterns
+ * (/tmp/fablize-deep/scripts/gate/classify_task.py:29-40). */
+export function detectRiskFlags(text: string): RiskFlag[] {
+  const value = text || ""
+  const risks: RiskFlag[] = []
+  if (/\b(?:production|prod|deploy|deployment)\b|프로덕션|운영\s*환경|배포/i.test(value)) {
+    risks.push("production")
+  }
+  if (/\b(?:db|database|migration|migrate|schema)\b|데이터베이스|마이그레이션|스키마/i.test(value)) {
+    risks.push("database")
+  }
+  if (/\b(?:auth|authentication|secret|token|password|api[_ -]?key)\b|인증|비밀|토큰|비밀번호|api\s*키/i.test(value)) {
+    risks.push("secret-or-auth")
+  }
+  if (/\bgit\s+push\b|\b(?:release|publish)\b|릴리즈|게시|배포/i.test(value)) {
+    risks.push("remote-write")
+  }
+  return risks
+}
+
 export function classifyStopMode(text: string): StopModeResult {
   const t = text || ""
-  const lower = t.toLowerCase()
-  const risks: RiskFlag[] = []
-  if (lower.includes("production") || /\bdeploy\b/i.test(t)) risks.push("production")
-  if (/\b(db|database|migration|migrate|schema)\b/i.test(t)) risks.push("database")
-  if (/\b(auth|secret|token|api[_-]?key|password)\b/i.test(t)) risks.push("secret-or-auth")
-  if (/\bgit\s+push|release|publish\b/i.test(t)) risks.push("remote-write")
+  const risks = detectRiskFlags(t)
 
-  // deep wins: any deep keyword OR any high-risk flag → deep
-  if (DEEP_RE.test(t) || risks.includes("production") || risks.includes("database") || risks.includes("remote-write")) {
+  // deep wins: any deep keyword OR any risk flag → deep
+  if (DEEP_RE.test(t) || risks.length > 0) {
     return { mode: "deep", risks }
   }
   // quick only when no risk flags (a "quick deploy" is still deep)
@@ -742,7 +771,11 @@ export const ElicifyVertexPlugin = async (
   const debug = (msg: string) => {
     if (!DEBUG) return
     try {
-      appendFileSync(debugLog, `[${new Date().toISOString()}] ${msg}\n`)
+      appendFileSync(debugLog, `[${new Date().toISOString()}] ${redactSecrets(msg)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      })
+      chmodSync(debugLog, 0o600)
     } catch {}
   }
   debug("plugin loaded — debug mode enabled")
@@ -793,7 +826,7 @@ verify before claiming done, control things manually, communicate calmly.`,
         if (agent === opts.activeAgent || triggerRe.test(text)) {
           gate.activate(msgInput.sessionID)
           const sigMode = classifyStopMode(text)
-          ledger.reset(msgInput.sessionID, sigMode.mode)
+          ledger.reset(msgInput.sessionID, sigMode.mode, sigMode.risks)
           stopModeBySession.set(msgInput.sessionID, sigMode)
           const mode = classifyTask(text)
           taskModeBySession.set(msgInput.sessionID, mode)
@@ -802,6 +835,7 @@ verify before claiming done, control things manually, communicate calmly.`,
             mode,
             agent: agent || undefined,
             trigger: triggerRe.test(text) ? opts.activeSkillTrigger : undefined,
+            risks: sigMode.risks,
           })
         } else if (agent !== undefined && agent !== opts.activeAgent) {
           gate.deactivate(msgInput.sessionID)

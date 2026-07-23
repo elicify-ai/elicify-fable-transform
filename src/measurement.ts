@@ -34,9 +34,10 @@
  */
 
 import { createHash } from "node:crypto"
-import { appendFileSync, mkdirSync } from "node:fs"
+import { appendFileSync, chmodSync, mkdirSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { homedir } from "node:os"
+import { redactForDisk } from "./redaction.js"
 
 // ---------- constants (mirror fablize/shadow_logger.py:21-24) ----------------
 
@@ -139,8 +140,10 @@ export function makeEvent(
 export function appendEvent(event: MeasurementEvent, path?: string): string {
   const p = path ?? eventsPath()
   try {
-    mkdirSync(dirname(p), { recursive: true })
-    appendFileSync(p, JSON.stringify(event) + "\n", { encoding: "utf8" })
+    mkdirSync(dirname(p), { recursive: true, mode: 0o700 })
+    const safeEvent = redactForDisk(event)
+    appendFileSync(p, JSON.stringify(safeEvent) + "\n", { encoding: "utf8", mode: 0o600 })
+    chmodSync(p, 0o600)
   } catch {
     // out-of-band: swallow — never let measurement break the plugin
   }
@@ -165,6 +168,7 @@ export interface ClassifyPayload extends EventPayload {
   mode: string
   agent?: string
   trigger?: string
+  risks?: readonly string[]
 }
 
 export interface GateFirePayload extends EventPayload {
