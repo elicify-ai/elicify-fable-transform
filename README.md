@@ -36,15 +36,11 @@ The plugin only activates when you want it to — when you're using the **Helmsm
 
 ## Installation
 
-Add the plugin to your `opencode.json`:
-
-```json
-{
-  "plugin": ["@elicify-ai/elicify-vertex"]
-}
+```bash
+npm install @elicify-ai/elicify-vertex
 ```
 
-That's it. opencode installs the package automatically on startup. The skill (`/vertex`) is installed for you — no manual steps, no symlinks, no configuration files to edit.
+Then restart opencode. That's it — the plugin and the `/vertex` skill are fully installed. No manual steps, no symlinks, no config files to edit.
 
 ## How to use
 
