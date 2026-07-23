@@ -1,9 +1,9 @@
 ---
-name: elicify-fable-transform
-description: Inject harness directives into the LLM input via the official opencode chat.system.transform and chat.messages.transform hooks. The correct, SDK-native place to add post-tool evidence, loop reminders, and per-session instructions — instead of stamping tool output. Use when wiring a verification/contract block, a stop-block reminder, or any per-session directive that should reach the LLM as a system instruction rather than as part of a tool reply. Triggers on phrases like "add a verification reminder to the LLM", "inject a contract block into the system prompt", or when the elicify-fable-transform plugin is loaded and a Stop/PostToolUse hook needs to enqueue a directive.
+name: elicify-vertex
+description: Inject harness directives into the LLM input via the official opencode chat.system.transform and chat.messages.transform hooks. The correct, SDK-native place to add post-tool evidence, loop reminders, and per-session instructions — instead of stamping tool output. Use when wiring a verification/contract block, a stop-block reminder, or any per-session directive that should reach the LLM as a system instruction rather than as part of a tool reply. Triggers on phrases like "add a verification reminder to the LLM", "inject a contract block into the system prompt", or when the elicify-vertex plugin is loaded and a Stop/PostToolUse hook needs to enqueue a directive.
 ---
 
-# elicify-fable-transform
+# elicify-vertex
 
 A reference opencode plugin that wires the **correct** LLM-input injection hooks: `experimental.chat.system.transform` (preferred, per-session) and `experimental.chat.messages.transform` (fallback, global).
 
@@ -26,10 +26,10 @@ A reference opencode plugin that wires the **correct** LLM-input injection hooks
 3. On the next LLM call, `experimental.chat.system.transform` drains the queue for that session and appends a tagged block to the system prompt:
 
 ```
-<elicify-fable-directives ts="2026-07-23T...">
-[elicify-fable:contract]
-[elicify-fable] Verification reminder: ...
-</elicify-fable-directives>
+<elicify-vertex-directives ts="2026-07-23T...">
+[elicify-vertex:contract]
+[elicify-vertex] Verification reminder: ...
+</elicify-vertex-directives>
 ```
 
 4. If `system.transform` is unavailable, the optional `experimental.chat.messages.transform` fallback rewrites the messages array and tags the directives onto the last message as a synthetic note.
@@ -37,9 +37,9 @@ A reference opencode plugin that wires the **correct** LLM-input injection hooks
 ## API (from `src/index.ts`)
 
 ```ts
-import ElicifyFableTransformPlugin from "elicify-fable-transform"
+import ElicifyVertexPlugin from "elicify-vertex"
 
-const t = await ElicifyFableTransformPlugin(ctx)
+const t = await ElicifyVertexPlugin(ctx)
 t.enqueue(sessionID, {
   id: "post-tool:evidence",
   text: "Tool call observed a failure. Surface it; do not retry silently.",
@@ -52,20 +52,20 @@ In `opencode.json`:
 
 ```json
 {
-  "plugin": ["elicify-fable-transform"]
+  "plugin": ["elicify-vertex"]
 }
 ```
 
 For local development, point the plugin at the working copy:
 
 ```json
-{ "plugin": ["./elicify-fable-transform/src/index.ts"] }
+{ "plugin": ["./elicify-vertex/src/index.ts"] }
 ```
 
 ## Configuration
 
 ```ts
-interface ElicifyFableTransformOptions {
+interface ElicifyVertexOptions {
   maxPerSession?: number         // default 16
   wireMessagesTransform?: boolean // default true
   systemDirectives?: () => Directive[] // default: verification reminder
@@ -83,5 +83,5 @@ npm run build
 
 ## See also
 
-- The companion primary agent: **Elicify-Fable-Architect** (lives in `~/.config/opencode/agents/elicify-fable-architect.md`).
+- The companion primary agent: **Elicify-Fable-Architect** (lives in `~/.config/opencode/agents/elicify-vertex-architect.md`).
 - The opencode plugin SDK: https://opencode.ai/docs/plugins/

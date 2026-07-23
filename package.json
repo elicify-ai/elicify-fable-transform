@@ -1,7 +1,7 @@
 {
-  "name": "@elicify-ai/elicify-fable-transform",
-  "version": "0.1.0",
-  "description": "Opencode plugin that injects harness directives into the LLM input via the official chat.transform hooks. The correct, SDK-native place to add post-tool evidence, loop reminders, and per-session instructions — instead of stamping tool output.",
+  "name": "@elicify-ai/elicify-vertex",
+  "version": "0.2.0",
+  "description": "Opencode plugin that injects harness directives into the LLM input via the official chat.transform hooks — verification, evidence, and communication discipline as procedure, not luck.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -32,7 +32,8 @@
     "opencode",
     "opencode-plugin",
     "elicify",
-    "elicify-fable",
+    "elicify-vertex",
+    "vertex",
     "harness",
     "verification",
     "directives"
@@ -41,12 +42,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/elicify-ai/elicify-fable-transform.git"
+    "url": "https://github.com/elicify-ai/elicify-vertex.git"
   },
   "bugs": {
-    "url": "https://github.com/elicify-ai/elicify-fable-transform/issues"
+    "url": "https://github.com/elicify-ai/elicify-vertex/issues"
   },
-  "homepage": "https://github.com/elicify-ai/elicify-fable-transform#readme",
+  "homepage": "https://github.com/elicify-ai/elicify-vertex#readme",
   "engines": {
     "node": ">=20"
   },

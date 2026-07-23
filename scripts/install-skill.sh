@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# elicify-fable-transform — install the skill without symlinks.
+# elicify-vertex — install the skill without symlinks.
 #
-# Copies skills/elicify-fable-transform/SKILL.md into the user's opencode
-# skills directory so the /elicify-fable-transform slash command works.
+# Copies skills/elicify-vertex/SKILL.md into the user's opencode
+# skills directory so the /elicify-vertex slash command works.
 #
 # Behaviour:
 #   - Creates the target skill directory as a real directory (no symlinks).
@@ -21,7 +21,7 @@ set -euo pipefail
 # --- resolve source file (this script's own package) -----------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SOURCE_SKILL="$PACKAGE_ROOT/skills/elicify-fable-transform/SKILL.md"
+SOURCE_SKILL="$PACKAGE_ROOT/skills/elicify-vertex/SKILL.md"
 
 if [[ ! -f "$SOURCE_SKILL" ]]; then
   echo "install-skill: source SKILL.md not found at $SOURCE_SKILL" >&2
@@ -34,7 +34,7 @@ if [[ -n "${SKILL_TARGET_DIR:-}" ]]; then
   TARGET_DIR="$SKILL_TARGET_DIR"
 else
   CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
-  TARGET_DIR="$CONFIG_ROOT/skills/elicify-fable-transform"
+  TARGET_DIR="$CONFIG_ROOT/skills/elicify-vertex"
 fi
 
 # --- guard: never follow an existing symlink at the target ----------------

@@ -1,4 +1,4 @@
-# elicify-fable-transform
+# elicify-vertex
 
 An [opencode](https://opencode.ai) plugin that injects harness directives into the
 **LLM input** — the way Claude's plugin runtime does via
@@ -33,27 +33,27 @@ The plugin is **self-contained** — no symlinks required.
 ### From npm
 
 ```bash
-npm install elicify-fable-transform
+npm install elicify-vertex
 ```
 
 The `postinstall` hook runs `scripts/install-skill.sh`, which copies the
-shipped `SKILL.md` into `${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills/elicify-fable-transform/SKILL.md`
-as a **real file** (no symlink). The `/elicify-fable-transform` slash
+shipped `SKILL.md` into `${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills/elicify-vertex/SKILL.md`
+as a **real file** (no symlink). The `/elicify-vertex` slash
 command is then available in opencode.
 
 Add the plugin to `opencode.json`:
 
 ```json
 {
-  "plugin": ["elicify-fable-transform"]
+  "plugin": ["elicify-vertex"]
 }
 ```
 
 ### From source (local dev)
 
 ```bash
-git clone https://github.com/elicify-ai/elicify-fable-transform
-cd elicify-fable-transform
+git clone https://github.com/elicify-ai/elicify-vertex
+cd elicify-vertex
 npm install
 npm run setup        # copies SKILL.md to ~/.config/opencode/skills/...
 npm run build
@@ -63,14 +63,14 @@ Then point opencode at the working copy:
 
 ```json
 {
-  "plugin": ["./elicify-fable-transform/src/index.ts"]
+  "plugin": ["./elicify-vertex/src/index.ts"]
 }
 ```
 
 ### Custom install location
 
 ```bash
-SKILL_TARGET_DIR=/path/to/skills/elicify-fable-transform bash scripts/install-skill.sh
+SKILL_TARGET_DIR=/path/to/skills/elicify-vertex bash scripts/install-skill.sh
 ```
 
 To overwrite an existing `SKILL.md`:
@@ -83,7 +83,7 @@ SKILL_FORCE=1 bash scripts/install-skill.sh
 
 - The skill file is copied as a regular file.
 - The plugin source lives in `node_modules/` (or your local path) as real files.
-- No symlinks to `~/.claude/skills`, `~/.config/opencode/fablize`, or any other
+- No symlinks to `~/.claude/skills`, `~/.config/opencode/vertex`, or any other
   system path are created by this package.
 
 If your `~/.config/opencode/skills` happens to be a symlink to
@@ -95,14 +95,14 @@ symlink, not this plugin's.
 
 ```ts
 import type { Plugin } from "@opencode-ai/plugin"
-import ElicifyFableTransformPlugin from "elicify-fable-transform"
+import ElicifyVertexPlugin from "elicify-vertex"
 
 export const MyPlugin: Plugin = async (ctx) => {
   // 1) Ensure the transform plugin is also loaded (opencode loads it
   //    from opencode.json — no need to require() it here).
   // 2) In a Stop or PostToolUse hook, write a directive into the
   //    transform plugin's queue via a shared module:
-  const t = await ElicifyFableTransformPlugin(ctx)
+  const t = await ElicifyVertexPlugin(ctx)
 
   return {
     async event({ event }) {
@@ -135,13 +135,13 @@ interface Directive {
 }
 ```
 
-### `ElicifyFableTransformOptions`
+### `ElicifyVertexOptions`
 
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `maxPerSession` | `number` | `16` | Cap on queued directives per session. Oldest is dropped. |
 | `wireMessagesTransform` | `boolean` | `true` | Also wire the messages-array rewrite as a fallback. |
-| `systemDirectives` | `() => Directive[]` | elicify-fable reminder | Always-on directives injected every turn. |
+| `systemDirectives` | `() => Directive[]` | elicify-vertex reminder | Always-on directives injected every turn. |
 
 ### `formatDirectives(directives)`
 
@@ -160,7 +160,7 @@ to a system prompt.
   both add to the existing output so other plugins' transforms are
   preserved.
 - **Tagged synthetic content.** Directives are wrapped in
-  `<elicify-fable-directives ts="...">...</elicify-fable-directives>` so they are
+  `<elicify-vertex-directives ts="...">...</elicify-vertex-directives>` so they are
   easy to grep for in logs and easy for the model to recognise as
   harness-injected (not user-typed).
 - **Fails open.** No throw paths in the hooks — a broken transform must
@@ -181,5 +181,5 @@ MIT — see [LICENSE](./LICENSE).
 
 ## Companion artifacts
 
-- **Skill:** `SKILL.md` (and `skills/elicify-fable-transform/SKILL.md`) — installable into `~/.config/opencode/skills/elicify-fable-transform/` for the `/elicify-fable-transform` slash command.
-- **Architect agent:** **Elicify-Fable-Architect** — the principal orchestrator that uses this transform plugin to inject verification reminders. Lives in `~/.config/opencode/agents/elicify-fable-architect.md`.
+- **Skill:** `SKILL.md` (and `skills/elicify-vertex/SKILL.md`) — installable into `~/.config/opencode/skills/elicify-vertex/` for the `/elicify-vertex` slash command.
+- **Architect agent:** **Elicify-Fable-Architect** — the principal orchestrator that uses this transform plugin to inject verification reminders. Lives in `~/.config/opencode/agents/elicify-vertex-architect.md`.

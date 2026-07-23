@@ -1,35 +1,30 @@
 /**
- * elicify-fable-transform
+ * elicify-vertex
  * --------------------------------------------------------------------------
  * An opencode plugin that injects harness directives into the **LLM input**
  * via the official `chat.system.transform` and `chat.messages.transform` hooks.
  *
- * Why this plugin exists
- * ----------------------
- * Claude's plugin model lets you return `hookSpecificOutput.additionalContext`
- * from a `PostToolUse` hook — the runtime injects it as a *separate user
- * message* into the model's next turn. That is a strong steering signal.
+ * What it does
+ * ------------
+ * Makes the model prove its work before claiming done. Enforces verification,
+ * evidence, and communication discipline as procedure — not as luck.
  *
- * opencode's SDK does not (yet) have an equivalent post-tool injection hook
- * whose output becomes a new message. The closest non-deprecated options are:
+ * How it works
+ * ------------
+ * opencode's SDK exposes two transform hooks:
  *
  *   1. `experimental.chat.system.transform`  — append to the system prompt
  *      for the next turn. Has `sessionID` in its input. **Recommended.**
  *   2. `experimental.chat.messages.transform` — rewrite the full messages
  *      array. Does **not** expose `sessionID` in current typings; treat as
  *      a global, last-resort hook.
- *   3. `tool.execute.after`  — stamping `output.output` reaches the LLM,
- *      but as the **tool's reply**, not as a directive. Weak steering.
  *
- * This plugin implements (1) and (2) correctly, with a tiny per-session
- * queue so any hook in your plugin (Stop, PostToolUse, custom events) can
- * enqueue a directive and have it land as a *system instruction* on the
- * next LLM call.
+ * This plugin implements both, with a tiny per-session queue so any hook
+ * (Stop, PostToolUse, custom events) can enqueue a directive and have it
+ * land as a *system instruction* on the next LLM call.
  *
- * It is a reference implementation, not a finished product. The default
- * directive is a verification reminder so the plugin is immediately useful
- * in an elicify-fable harness, but the real value is the queue + transform
- * wiring.
+ * Inspired by the behavioral patterns of Claude Fable 5 — but stands on its
+ * own as a model-agnostic verification harness.
  *
  * @see https://opencode.ai/docs/plugins/
  */
@@ -61,7 +56,7 @@ export interface Directive {
   readonly at?: string
 }
 
-export interface ElicifyFableTransformOptions {
+export interface ElicifyVertexOptions {
   /**
    * Cap on how many directives can be queued per session. Once exceeded,
    * the oldest directive is dropped. Default: 16.
@@ -77,7 +72,7 @@ export interface ElicifyFableTransformOptions {
 
   /**
    * A producer that returns a list of "always-on" directives to inject on
-   * every turn. Use this for the elicify-fable contract block. Return []
+   * every turn. Use this for the vertex contract block. Return []
    * to disable. Default: a minimal verification-reminder.
    */
   readonly systemDirectives?: () => readonly Directive[]
@@ -131,7 +126,7 @@ class DirectiveQueue {
 // Formatting
 // ---------------------------------------------------------------------------
 
-const DEFAULT_BLOCK = `[elicify-fable] Verification reminder: before reporting a task as done,
+const DEFAULT_BLOCK = `[vertex] Verification reminder: before reporting a task as done,
 - observe the actual output of the change (run the test, render the artifact, hit the endpoint);
 - ground any "done" claim in a tool result from this turn, not in intent;
 - if a step failed and you cannot fix it, surface that explicitly.
@@ -143,7 +138,7 @@ Communicate in a calm, factual tone. Lead with the outcome. Avoid enthusiasm, ap
 function defaultDirectives(): readonly Directive[] {
   return [
     {
-      id: "elicify-fable:contract",
+      id: "vertex:contract",
       text: DEFAULT_BLOCK,
     },
   ]
@@ -156,7 +151,7 @@ export function formatDirectives(directives: readonly Directive[]): string | nul
   const body = directives
     .map((d) => `[${d.id}${d.at ? ` @ ${d.at}` : ""}]\n${d.text.trim()}`)
     .join("\n\n---\n\n")
-  return `<elicify-fable-directives ts="${stamp}">\n${body}\n</elicify-fable-directives>`
+  return `<vertex-directives ts="${stamp}">\n${body}\n</vertex-directives>`
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +161,7 @@ export function formatDirectives(directives: readonly Directive[]): string | nul
 /**
  * Opencode plugin entrypoint. Wire it in `opencode.json`:
  *
- *   { "plugin": ["elicify-fable-transform"] }
+ *   { "plugin": ["elicify-vertex"] }
  *
  * Exposes:
  *   - `enqueue(sessionID, directive)` — call from any other plugin (or from
@@ -178,12 +173,12 @@ export function formatDirectives(directives: readonly Directive[]): string | nul
  *     all queued directives, written into the last assistant turn. Use
  *     only if `system.transform` is unavailable.
  */
-export const ElicifyFableTransformPlugin: Plugin = async (ctx) => {
-  const opts: Required<ElicifyFableTransformOptions> = {
+export const ElicifyVertexPlugin: Plugin = async (ctx) => {
+  const opts: Required<ElicifyVertexOptions> = {
     maxPerSession: 16,
     wireMessagesTransform: true,
     systemDirectives: defaultDirectives,
-    ...(ctx as unknown as ElicifyFableTransformOptions),
+    ...(ctx as unknown as ElicifyVertexOptions),
   }
 
   const queue = new DirectiveQueue(opts.maxPerSession)
@@ -194,7 +189,7 @@ export const ElicifyFableTransformPlugin: Plugin = async (ctx) => {
      * Optional companion API exposed on the plugin return value so other
      * plugins (or your own custom hooks) can enqueue directives:
      *
-     *   const t = await ElicifyFableTransformPlugin(ctx)
+     *   const t = await ElicifyVertexPlugin(ctx)
      *   t.enqueue(sessionID, { id: "stop:block", text: "..." })
      *
      * Opencode's plugin API doesn't surface a "shared registry" object
@@ -255,4 +250,4 @@ export const ElicifyFableTransformPlugin: Plugin = async (ctx) => {
   }
 }
 
-export default ElicifyFableTransformPlugin
+export default ElicifyVertexPlugin
