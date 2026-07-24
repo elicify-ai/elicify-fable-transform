@@ -259,11 +259,11 @@ export class EvidenceLedger {
   shouldBlockStop(sessionID: string): boolean {
     const l = this.ledgers.get(sessionID)
     if (!l) return false
-    // quick and normal never hard-block (verify_state.py:38-39,48-49).
+    // quick and normal never hard-block.
     if (l.taskMode !== "deep") return false
-    // docs-only → never block (verify_state.py:40-41 via docs_only).
+    // docs-only → never block.
     if (l.changedFileKinds.size > 0 && [...l.changedFileKinds].every((k) => k === "docs")) return false
-    // deep AND changed AND not verified → block (verify_state.py:46).
+    // deep AND changed AND not verified → block.
     return l.changedFilesSeen && !l.verificationResults.some((v) => v.success)
   }
 
@@ -647,8 +647,10 @@ export interface PromiseHit {
 }
 
 /**
- * Scan assistant text for promise-no-act signals. Returns ALL hits (not just
- * the first) so callers can log them out-of-band for measurement.
+ * Scan assistant text for promise-no-act signals. The keyword loop returns
+ * every occurrence of every needle; the intent-pattern loop returns the first
+ * match per pattern (patterns are not /g). Callers log all hits out-of-band
+ * for measurement.
  *
  * Promise-no-act detector (finish-the-work policy) covers:
  *   - Explicit deferral markers (TODO/FIXME/XXX/deferred)
@@ -715,7 +717,7 @@ function asksUser(text: string): boolean {
   return /\b(?:shall i|should i|would you like|do you want|let me know|which option)\b/i.test(tail)
 }
 
-/** Normalize a failure summary into a stable class key (fablize parity).
+/** Normalize a failure summary into a stable class key.
  * Paths collapse to " path", digits to "#", so two occurrences with different
  * filenames or line numbers land on the same repeat-failure bucket.
  * Crucially, do NOT collapse all words to "#" — keep word structure so
@@ -847,8 +849,7 @@ export function classifyStopMode(text: string): StopModeResult {
 }
 
 /** Mode guidance is injected independently from signal routing. Normal mode is
- * advisory-only; deep mode defines exit proof before the stop gate can fire.
- * Mirrors classify_task.py:51-67 and verify_state.py:42-49. */
+ * advisory-only; deep mode defines exit proof before the stop gate can fire. */
 export function contextForStopMode(result: StopModeResult): Directive | null {
   const risks = result.risks.length > 0 ? ` Risk flags: ${result.risks.join(", ")}.` : ""
   if (result.mode === "normal") {
@@ -1576,8 +1577,9 @@ $ARGUMENTS`,
         // After a tool call, any prior assistant text is no longer the
         // "final" reply of the turn (the model may produce more text later).
         // Clearing it on tool.after means session.idle only sees the last text
-        // produced AFTER the latest tool call, mirroring fablize's
-        // `last_had_tool` exemption.
+        // produced AFTER the latest tool call; when the turn ends on a tool
+        // part, stale text (e.g. "Let me run the tests now") must not survive
+        // into session.idle.
         if (gate.isActive(sid)) {
           lastAssistantText.delete(sid)
         }
@@ -1662,7 +1664,6 @@ $ARGUMENTS`,
 
       const combined: Directive[] = [...alwaysOn()]
 
-      // Signal-routed procedure
       const mode = taskModeBySession.get(sid)
       if (mode) {
         const routed = contextForMode(mode)
@@ -1713,12 +1714,6 @@ $ARGUMENTS`,
       }
     },
 
-    // `experimental.chat.messages.transform` is invoked after text is
-    // assembled; on each call the last assistant text is a fresh chunk. We
-    // also clear on tool.execute.after below to honor fablize's last_had_tool
-    // exemption: when the turn ends on a tool part, do not let stale text
-    // (e.g. "Let me run the tests now") survive into session.idle.
-
     async "experimental.session.compacting"(compactionInput) {
       compactingSessions.add(compactionInput.sessionID)
     },
@@ -1749,7 +1744,7 @@ $ARGUMENTS`,
 
         // In-flight guard: if a forced continuation is still pending, do not
         // re-block. Prevents double idles from issuing two session.prompts for
-        // the same stop (fablize `stop_hook_active` parity).
+        // the same stop.
         if (gateContinuationSessions.has(sid)) {
           debug(`event: ${sid} — session.idle SKIPPED (continuation in-flight)`)
           return
@@ -1769,7 +1764,7 @@ $ARGUMENTS`,
             const reason = `[vertex:promise-no-act] Your last message states an intent to do further work (${labels}) after changing files, without doing it. Do that work now with tool calls. End the turn only when the work is complete, or ask the user a direct question if you are blocked on input only they can provide.`
             debug(`event: ${sid} — PROMISE-NO-ACT (${labels})`)
 
-            // M3 holdout skip (same as the unverified block path)
+            // Holdout skip (same as the unverified block path)
             if (holdoutSuppresses(sid)) {
               logHoldoutSuppress(sid, "promise-no-act skipped (holdout arm=off)")
               logGateFire(sid, {
@@ -1830,8 +1825,8 @@ $ARGUMENTS`,
 
         const blocks = ledger.getStopBlocks(sid)
 
-        // M3-style holdout: env-gated (default OFF) skip for the 'off' arm.
-        // Mirrors gate_stop.py:26-38. When VERTEX_HOLDOUT=1 AND this session
+        // Holdout: env-gated (default OFF) skip for the 'off' arm.
+        // When VERTEX_HOLDOUT=1 AND this session
         // is in the 'off' arm, skip the gate and log the suppression
         // out-of-band. The model never sees the arm; the reason is
         // measurement-only.

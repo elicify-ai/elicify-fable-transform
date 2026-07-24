@@ -43,7 +43,7 @@ export const HOLDOUT_OFF_FRACTION = 0.2
 /** §7: default sunset horizon (sessions). */
 export const SUNSET_SESSIONS = 50
 
-/** Holdout arm values (mirrors shadow_logger.py:50). */
+/** Holdout arm values. */
 export type HoldoutArm = "on" | "off"
 
 /** Event types (MEASUREMENT_PROTOCOL.md §2). */
@@ -81,7 +81,7 @@ export function eventsPath(): string {
   return resolve(dataRoot(), ".vertex-events.jsonl")
 }
 
-// ---------- holdout (mirror shadow_logger.py:42-50) --------------------------
+// ---------- holdout ------------------------------------------
 
 /**
  * Deterministic per-session holdout arm. Same session_id always returns same
@@ -100,7 +100,6 @@ export function holdoutArm(sessionId: string | undefined | null): HoldoutArm {
  * env-gated (default OFF) holdout suppression: returns true only when the
  * env flag is set AND the session is in the 'off' arm. Default behaviour is
  * always 'do not suppress', so the gate is unchanged when the flag is unset.
- * Mirrors gate_stop.py:26-38 + test_shadow_m3.py:46-58.
  */
 export function holdoutSuppresses(sessionId: string | undefined | null): boolean {
   if (process.env.VERTEX_HOLDOUT !== "1") return false
@@ -131,7 +130,6 @@ export function makeEvent(
 /**
  * Append one event to the events JSONL (append-only, never rewrites). Failures
  * are fail-open for the plugin hot path but logged to stderr for operators.
- * Mirrors shadow_logger.py:63-69.
  */
 export function appendEvent(event: MeasurementEvent, path?: string): string {
   const p = path ?? eventsPath()
@@ -246,5 +244,3 @@ export function logOutcome(
 //     events: MeasurementEvent[],
 //     source: { commits?: Commit[]; userMessages?: string[] },
 //   ): Promise<number>  // returns count of outcome events written
-//
-// Mirrors shadow_collect.py:40-94 + test_shadow_m3.py:27-43.
