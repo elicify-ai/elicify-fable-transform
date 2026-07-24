@@ -100,7 +100,7 @@ describe("parseVerification — watch-mode runners are never verified", () => {
   })
 })
 
-describe("failureSignature (fablize parity)", () => {
+describe("failureSignature", () => {
   it("same class collapses to same key", () => {
     expect(failureSignature("Error: ENOENT /a/b/c.ts:42 doing X")).toBe(
       failureSignature("Error: ENOENT /d/e/f.ts:99 doing X"),

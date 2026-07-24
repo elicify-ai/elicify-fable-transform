@@ -38,7 +38,7 @@ beforeEach(() => {
   savedVertexHoldout = process.env.VERTEX_HOLDOUT
   tmpRoot = mkdtempSync(join(tmpdir(), "vertex-meas-"))
   process.env.VERTEX_DATA = tmpRoot
-  // ensure default-OFF (test_shadow_m3.py:49)
+  // ensure default-OFF
   delete process.env.VERTEX_HOLDOUT
 })
 
@@ -51,17 +51,17 @@ afterEach(() => {
 })
 
 describe("holdoutArm", () => {
-  it("is deterministic for the same sessionID (test_shadow.py:27-28)", () => {
+  it("is deterministic for the same sessionID", () => {
     expect(holdoutArm("abc")).toBe(holdoutArm("abc"))
   })
 
-  it("treats empty sessionID as 'on' (shadow_logger.py:47)", () => {
+  it("treats empty sessionID as 'on'", () => {
     expect(holdoutArm("")).toBe("on")
     expect(holdoutArm(undefined)).toBe("on")
     expect(holdoutArm(null)).toBe("on")
   })
 
-  it("is ~20% off over 3000 sessions (test_shadow.py:31-35)", () => {
+  it("is ~20% off over 3000 sessions", () => {
     const ids = Array.from({ length: 3000 }, (_, i) => `sess-${i}`)
     const off = ids.filter((s) => holdoutArm(s) === "off").length
     const frac = off / ids.length
@@ -70,13 +70,13 @@ describe("holdoutArm", () => {
     expect(HOLDOUT_OFF_FRACTION).toBe(0.2)
   })
 
-  it("exposes SUNSET_SESSIONS=50 (shadow_logger.py:24, MEASUREMENT_PROTOCOL.md §7)", () => {
+  it("exposes SUNSET_SESSIONS=50 (MEASUREMENT_PROTOCOL.md §7)", () => {
     expect(SUNSET_SESSIONS).toBe(50)
   })
 })
 
-describe("holdoutSuppresses (env-gated, default OFF; mirrors gate_stop.py:26-38)", () => {
-  it("does NOT suppress by default (test_shadow_m3.py:49-51)", () => {
+describe("holdoutSuppresses (env-gated, default OFF)", () => {
+  it("does NOT suppress by default", () => {
     // find an off-arm session deterministically
     const off = Array.from({ length: 5000 }, (_, i) => `s${i}`).find(
       (s) => holdoutArm(s) === "off",
@@ -84,7 +84,7 @@ describe("holdoutSuppresses (env-gated, default OFF; mirrors gate_stop.py:26-38)
     expect(holdoutSuppresses(off)).toBe(false)
   })
 
-  it("suppresses off-arm only when VERTEX_HOLDOUT=1 (test_shadow_m3.py:53-57)", () => {
+  it("suppresses off-arm only when VERTEX_HOLDOUT=1", () => {
     process.env.VERTEX_HOLDOUT = "1"
     const off = Array.from({ length: 5000 }, (_, i) => `s${i}`).find(
       (s) => holdoutArm(s) === "off",
@@ -97,7 +97,7 @@ describe("holdoutSuppresses (env-gated, default OFF; mirrors gate_stop.py:26-38)
   })
 })
 
-describe("event schema (MEASUREMENT_PROTOCOL.md §2; shadow_logger.py:53-60)", () => {
+describe("event schema (MEASUREMENT_PROTOCOL.md §2)", () => {
   it("makeEvent produces ts/session_id/holdout_arm/event_type/payload", () => {
     const ev = makeEvent("sess-1", "classify", { mode: "build" })
     expect(ev).toMatchObject({
@@ -110,13 +110,13 @@ describe("event schema (MEASUREMENT_PROTOCOL.md §2; shadow_logger.py:53-60)", (
     expect(ev.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   })
 
-  it("uses 'no-session' when sessionID is empty (shadow_logger.py:57)", () => {
+  it("uses 'no-session' when sessionID is empty", () => {
     const ev = makeEvent("", "classify", {})
     expect(ev.session_id).toBe("no-session")
   })
 })
 
-describe("appendEvent / out-of-band (shadow_logger.py:63-69, test_shadow.py:80-82)", () => {
+describe("appendEvent / out-of-band", () => {
   it("writes one JSONL line per event to the resolved events path", () => {
     const ep = eventsPath()
     expect(ep.startsWith(tmpRoot)).toBe(true)
@@ -128,19 +128,19 @@ describe("appendEvent / out-of-band (shadow_logger.py:63-69, test_shadow.py:80-8
     expect(JSON.parse(lines[1])).toMatchObject({ event_type: "gate_fire" })
   })
 
-  it("never writes into the project repo (test_shadow.py:80-82)", () => {
+  it("never writes into the project repo", () => {
     appendEvent(makeEvent("x", "classify", {}))
     const ep = eventsPath()
     const repoRoot = resolve(__dirname, "..")
     expect(ep.startsWith(repoRoot)).toBe(false)
   })
 
-  it("creates the data root if missing (shadow_logger.py:66)", () => {
+  it("creates the data root if missing", () => {
     rmSync(tmpRoot, { recursive: true, force: true })
     expect(() => appendEvent(makeEvent("x", "classify", {}))).not.toThrow()
   })
 
-  it("is append-only across calls (shadow_logger.py:64)", () => {
+  it("is append-only across calls", () => {
     appendEvent(makeEvent("a", "classify", { n: 1 }))
     appendEvent(makeEvent("a", "classify", { n: 2 }))
     const lines = readFileSync(eventsPath(), "utf8").trim().split("\n")
@@ -149,7 +149,7 @@ describe("appendEvent / out-of-band (shadow_logger.py:63-69, test_shadow.py:80-8
   })
 })
 
-describe("typed writers (mirror shadow_collect.py:74-91)", () => {
+describe("typed writers", () => {
   it("logClassify / logGateFire / logRecoveryRepeat / logOutcome / logHoldoutSuppress all emit the right event_type", () => {
     const sid = "sess-typed"
     logClassify(sid, { mode: "build", agent: "elicify-vertex-agent" })
