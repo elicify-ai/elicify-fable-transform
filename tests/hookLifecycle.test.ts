@@ -126,6 +126,37 @@ describe("mutation matrix", () => {
     ["printf hi 2>/dev/stderr", false],
     ["python -c \"print(open('f').read())\"", false],
     ["node -e \"console.log(require('fs').readFileSync('f','utf8'))\"", false],
+    ["printf hi 1>/dev/stdout", false],
+    ["printf hi 2>/dev/stderr", false],
+    ["python -c \"print(open('f').read())\"", false],
+    ["node -e \"console.log(require('fs').readFileSync('f','utf8'))\"", false],
+    // tee: device sinks are reads, real targets are writes
+    ["tee /dev/null", false],
+    ["tee /dev/stdout", false],
+    ["tee -a /dev/null", false],
+    ["tee -a /dev/stderr", false],
+    ["cat x | tee /dev/null", false],
+    ["echo hi | tee /dev/null", false],
+    ["cat x | tee out.txt", true],
+    ["echo hi | tee out.txt", true],
+    ["echo hi | tee -a out.txt", true],
+    // new mutators
+    ["git switch main", true],
+    ["git checkout feature-x", true],
+    ["curl -o out.json https://x", true],
+    ["curl -O out.json https://x", true],
+    ["curl --output out.json https://x", true],
+    ["wget -O out.html https://x", true],
+    ["wget --output out.html https://x", true],
+    // python heredoc (with and without -)
+    ["python3 <<PY\nopen('f','w').write('x')\nPY", true],
+    ["python3 - <<PY\nopen('f','w').write('x')\nPY", true],
+    ["python <<EOF\nopen('f','w').write('x')\nEOF", true],
+    // over-trigger guard: dev-docs NOT a watcher
+    ["npm run dev-docs", false],
+    ["npm run start:prod", false],
+    // bare --watch alone in echo args, not as flag
+    ["echo --watch", false],
   ] as const)("isMutatingBashCommand(%j) → %s", (command, expected) => {
     expect(isMutatingBashCommand(command)).toBe(expected)
   })

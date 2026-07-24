@@ -103,7 +103,12 @@ Successful verifications also mint an in-memory **verification receipt** (`vrf_�
 
 Detection hardening (no regressions vs fablize):
 - `npm run dev`, `npx vitest --watch` → ambiguous (not silently verified)
-- `ls | tee /dev/null` → not a mutation; `git switch main` / `curl -o` → mutation
+`ls | tee /dev/null` → not a mutation (and `tee` to a workspace file → mutation)
+- `python3 <<PY` heredoc writes detected
+- `git switch`, `curl --output`, `wget --output` added as mutations
+- watcher over-trigger guard (dev-docs NOT ambiguous)
+- failure-signature stability tests
+- promise-gate weak-label never-block tests; `git switch main` / `curl -o` → mutation
 - `grep "rm -rf"` / `man cp` / `echo "use mv"` → not mutations
 - Failure signature normalized for repeat detection (paths/digits)
 - Weak promise labels (tracked/tracking) never hard-block; only STRONG (TODO/FIXME/...)

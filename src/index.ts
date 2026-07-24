@@ -313,23 +313,39 @@ export function classifyFileKind(filePath: string): "docs" | "code" | "config" |
 // they are gated by MUTATING_BASH_RE / PYTHON_INLINE_WRITE_RE /
 // NODE_INLINE_WRITE_RE separately.
 const READER_HEAD_RE = /^(?:grep|rg|man|ls|pwd|which|whereis|help|info|file|strings|less|head|tail|awk|cat|echo|printf)\b/i
-// Anything from this list on the left of `|` or `;` is just a read — its
-// `tee` / `cp` / `rm` keywords (e.g. `man cp`, `grep "rm -rf"`) are non-mutating.
-const MUTATING_BASH_RE = /^(?:apply_patch\b|chmod|mkdir|mv\b|cp\b|rm\b|touch\b|install\b|ln\b|truncate\b|tee(?:\s+(?!-a\s*\/dev\/)|$))|\b(?:sed\s+-i|perl\s+-pi)\b|\bgit\s+(?:add|commit|checkout|switch|restore|reset|clean|apply|am|merge|rebase|cherry-pick)\b|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b|(?:^|\s)--(?:write|fix)\b|\bcurl\s+-o\b|\bwget\s+(?:-O\b|--output\b)/i
+// Mutators anchored to start-of-segment. `tee` is NOT here — handled by
+// teeIsMutation below so device-sink discards don't false-positive.
+const MUTATING_BASH_RE = /^(?:apply_patch\b|chmod|mkdir|mv\b|cp\b|rm\b|touch\b|install\b|ln\b|truncate\b)|\b(?:sed\s+-i|perl\s+-pi)\b|\bgit\s+(?:add|commit|checkout|switch|restore|reset|clean|apply|am|merge|rebase|cherry-pick)\b|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b|(?:^|\s)--(?:write|fix)\b|\bcurl\s+(?:-o\b|-O\b|--output\b|--output-document\b)\b|\bwget\s+(?:-O\b|--output\b|--output-document\b)\b/i
 // Sinks that are not real workspace writes (so they don't poison docs-only).
 const DEV_NULL_SINK_RE = /^\/dev\/(?:null|stdout|stderr)$/
-// `tee <file>` IS a write; `tee -a <file>` too; only `tee /dev/null|stdout|stderr`
-// (with or without -a) is a discard. We handle `| tee ...` via mutators above;
-// the redirect form is handled in shellRedirectTargetsWorkspace.
 /**
  * `echo/printf/cat … > file` or `>> file` — not `2>&1` / `>&2` / `n>&m`,
  * and not redirects whose target is a non-mutating device sink.
  */
 const SHELL_FILE_REDIRECT_RE = /(?:^|[\s;|&])(?:\d*)(>>(?!&)|>(?!>|&))\s*(\S+)/g
-/** python/python3 -c with open(...).write / writelines or write-mode open. */
-const PYTHON_INLINE_WRITE_RE = /\bpython(?:3(?:\.\d+)?)?\s+(?:-c\s+|-\s*<<['"]?PY['"]?[\s\S]*?PY[\s\S]*)(?:["']?\s*open\s*\([^)]*\)\s*\.\s*(?:write|writelines)\b|["']?\s*open\s*\([^)]*['"](?:w|a|x|r\+)[^'"]*['"][^)]*\))/i
 /** node -e / node -p with writeFile(Sync)/appendFile(Sync)/createWriteStream. */
 const NODE_INLINE_WRITE_RE = /\bnode\s+-[ep]\s+[\s\S]*\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream)\b/i
+
+/**
+ * Detect python/python3 inline writes: `python -c "open('f','w').write(...)"`
+ * AND heredoc form `python3 <<PY ... open('f','w').write(...) PY`.
+ * For heredocs we scan the heredoc body itself for `open(...).write|...writelines`
+ * or write-mode `open('…','w'|…)`.
+ */
+const PYTHON_INLINE_C_RE = /\bpython(?:3(?:\.\d+)?)?\s+-c\s+(?:["']\s*)?(?:\bopen\s*\([^)]*\)\s*\.\s*(?:write|writelines)\b|\bopen\s*\([^)]*['"](?:w|a|x|r\+)[^'"]*['"][^)]*\))/i
+const PYTHON_INLINE_HEREDOC_RE_G = /\bpython(?:3(?:\.\d+)?)?\s+-?\s*<<\s*(\S+)\s*\n([\s\S]*?)\n\1\b/gi
+function pythonIsMutation(command: string): boolean {
+  if (PYTHON_INLINE_C_RE.test(command)) return true
+  // Reset global regex state — global /g flags carry lastIndex across calls.
+  PYTHON_INLINE_HEREDOC_RE_G.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = PYTHON_INLINE_HEREDOC_RE_G.exec(command)) !== null) {
+    const body = m[2] ?? ""
+    if (/\bopen\s*\([^)]*\)\s*\.\s*(?:write|writelines)\b/i.test(body)) return true
+    if (/\bopen\s*\([^)]*['"](?:w|a|x|r\+)[^'"]*['"][^)]*\)/i.test(body)) return true
+  }
+  return false
+}
 
 /** True when a shell redirect target is a real workspace path (not a device sink). */
 function shellRedirectTargetsWorkspace(command: string): boolean {
@@ -344,7 +360,6 @@ function shellRedirectTargetsWorkspace(command: string): boolean {
   }
   return false
 }
-
 /** Segment command by shell composition (no quotes/parens awareness — best
  * effort, mirrors how the verification parser already works). */
 function bashSegments(command: string): string[] {
@@ -354,28 +369,45 @@ function bashSegments(command: string): string[] {
     .filter(Boolean)
 }
 
+/** Detect a `tee` write in `command`, honoring `tee -a /dev/null` etc. as a
+ * discard. `tee` may appear at start of segment, after `|`, after `>&`, or
+ * after space. The next non-flag token tells us if it's a real target. */
+function teeIsMutation(command: string): boolean {
+  // Each `tee` occurrence: capture everything between it and the next `;`, `&`,
+  // `|`, or end. Look at the first non-flag token.
+  const re = /(^|[|\s;])tee\b((?:\s+-[a-zA-Z]+)*)(?:\s+(\S+))?/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(command)) !== null) {
+    const flags = (m[2] || "").trim()
+    // `-a` does not change discard-vs-write. Other flags unknown — be conservative.
+    if (!/^(?:-a)?$/.test(flags)) continue
+    const target = (m[3] || "").replace(/^['"]|['"]$/g, "")
+    if (!target) continue
+    if (DEV_NULL_SINK_RE.test(target)) continue
+    return true
+  }
+  return false
+}
+
 /** True when a bash command is likely to mutate the workspace.
  *  Anchored to command-segment heads so `grep -rn "rm -rf"`, `man cp`,
  *  `echo "use mv"` are NOT counted as mutations. */
 export function isMutatingBashCommand(command: string): boolean {
   if (!command) return false
-  // If every segment starts with a reader AND there is no redirect-write,
-  // this is a read-only command. `echo > file` is a write (redirect),
-  // even though echo is otherwise a reader — the redirect-target check below
-  // handles that case.
+  // If every segment starts with a reader AND there is no redirect-write
+  // AND no `tee` to a real workspace target, this is a read-only command.
+  // `echo > file` is a write (redirect) even though echo is a reader head.
   const segments = bashSegments(command)
   if (segments.length > 0 && segments.every((seg) => READER_HEAD_RE.test(seg))) {
-    if (!shellRedirectTargetsWorkspace(command)) return false
+    if (!shellRedirectTargetsWorkspace(command) && !teeIsMutation(command)) return false
   }
-  // `tee <not-a-dev-null>` IS a write — left to MUTATING_BASH_RE.
-  // `tee -a /dev/null` etc. is a discard.
-  if (/\btee\s+(?:-a\s+)?(?:\/dev\/null|\/dev\/stdout|\/dev\/stderr)\b/i.test(command)) {
-    // A pure tee-to-dev-null alongside readers still non-mutating — handled above.
-  }
-  return MUTATING_BASH_RE.test(command)
+  // Check every segment against MUTATING_BASH_RE (anchored to segment head).
+  const anyMutator = segments.some((seg) => MUTATING_BASH_RE.test(seg))
     || shellRedirectTargetsWorkspace(command)
-    || PYTHON_INLINE_WRITE_RE.test(command)
+    || teeIsMutation(command)
+    || pythonIsMutation(command)
     || NODE_INLINE_WRITE_RE.test(command)
+  return anyMutator
 }
 
 export function changedPathsFromTool(toolName: string, args: Record<string, unknown>): string[] {
@@ -574,7 +606,9 @@ function asksUser(text: string): boolean {
 
 /** Normalize a failure summary into a stable class key (fablize parity).
  * Paths collapse to " path", digits to "#", so two occurrences with different
- * filenames or line numbers land on the same repeat-failure bucket. */
+ * filenames or line numbers land on the same repeat-failure bucket.
+ * Crucially, do NOT collapse all words to "#" — keep word structure so
+ * "Error: foo" and "Error: bar" remain distinct classes. */
 export function failureSignature(summary: string): string {
   if (!summary) return ""
   let s = summary.toLowerCase()
@@ -681,8 +715,10 @@ export function classifyStopMode(text: string): StopModeResult {
   // Read-only intent (explain-only / no-edits) keeps quick mode but only when
   // it doesn't look like actual work AND no risk flag is set. Risks promote
   // to deep regardless of intent wording (a "quick deploy to production" is
-  // still deep).
-  const readOnlyIntent = /\b(?:explain(?:\s+(?:only|how))?|describe|what\s+is|how\s+does|walk\s+me\s+through|no\s+edits?|do\s+not\s+edit|review\s+only)\b/i.test(t)
+  // still deep). `describe` alone is too broad — it triggers on "describe how
+  // to refactor auth", which is real work — require an explicit read-only
+  // qualifier (`describe only` / `explain only`) for it.
+  const readOnlyIntent = /\b(?:explain(?:\s+only)?|describe\s+only|what\s+is|how\s+does\s+\S+\s+work|walk\s+me\s+through|no\s+edits?|do\s+not\s+edit|review\s+only|do\s+not\s+code)\b/i.test(t)
   if (readOnlyIntent && risks.length === 0 && !DEEP_RE.test(t)) {
     return { mode: "quick", risks }
   }
@@ -963,7 +999,9 @@ export function parseVerification(command: string, output: string, exitCode?: nu
   // Watch-mode runners (vitest --watch, npm run dev, nodemon, …) must never
   // be treated as verification: they never exit on their own and the exit=0
   // we sometimes see is from a wrapper, not real proof.
-  const WATCH_RE = /(?:^|\s|--)watch(?:=|\b)|\brun\s+\S+:?watch\b|\bnodemon\b|\b(?:npm|pnpm|yarn|bun)\s+run\s+(?:dev|start)\b/i
+  // Anchor `dev`/`start` to end of token (followed by space/end/quote/`-`)
+  // so `npm run dev-docs` doesn't over-trigger.
+  const WATCH_RE = /(?:^|\s|--)watch(?:=|\b)|\brun\s+\S+[:.](?:watch|watch-mode)\b|\bnodemon\b|\b(?:npm|pnpm|yarn|bun)\s+run\s+(?:dev|start)(?=\s|$|"|'|--)/i
   if (WATCH_RE.test(parsedCommand)) {
     return { outcome: "ambiguous", isVerificationCommand: true, matchedPattern, failureDetected, successDetected, exitCodeReliable: false }
   }

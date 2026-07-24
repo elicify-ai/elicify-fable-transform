@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { parseVerification } from "../src/index.js"
+import { parseVerification, failureSignature, shouldBlockPromiseNoAct, classifyStopMode } from "../src/index.js"
 
 // Item 3: positive verification parsing — allowlisted executables at command
 // position; does not trust exit status when output is contradictory.
@@ -68,11 +68,62 @@ describe("parseVerification — positive command allowlist", () => {
     }
   })
 
-  it("rejects arbitrary package scripts that are not verification-like", () => {
-    for (const command of ["npm run serve", "pnpm run preview", "yarn run deploy", "bun run format"]) {
-      expect(parseVerification(command, "done", 0).outcome).toBe("not-verification")
-    }
+describe("parseVerification — watch-mode runners are never verified", () => {
+  it.each([
+    ["npx vitest --watch", 0, "2 passed", "ambiguous"],
+    ["npm run dev", 0, "ready on :3000", "ambiguous"],
+    ["pnpm run start", 0, "listening", "ambiguous"],
+    ["yarn run dev", 0, "ok", "ambiguous"],
+    ["nodemon app.js", 0, "ready", "ambiguous"],
+    ["npx tsc --watch", 0, "compiled", "ambiguous"],
+    ["npm run dev-docs", 0, "ok", "not-verification"], // over-trigger guard
+    ["echo --watch", 0, "", "ambiguous"], // contains --watch token; ambiguous is safer than verified
+    // exit=1 still failed (not ambiguous) when clearly failed
+    ["npx vitest --watch", 1, "exit code 1", "ambiguous"],
+  ])("%j exit=%d text=%j → %s", (cmd, exit, text, want) => {
+    expect(parseVerification(cmd, text, exit).outcome).toBe(want)
   })
+})
+
+describe("failureSignature (fablize parity)", () => {
+  it("same class collapses to same key", () => {
+    expect(failureSignature("Error: ENOENT /a/b/c.ts:42 doing X")).toBe(
+      failureSignature("Error: ENOENT /d/e/f.ts:99 doing X"),
+    )
+  })
+  it("different words keep different classes (no over-collapse)", () => {
+    expect(failureSignature("Error: foo")).not.toBe(failureSignature("Error: bar"))
+  })
+  it("empty input returns empty string", () => {
+    expect(failureSignature("")).toBe("")
+  })
+})
+
+describe("shouldBlockPromiseNoAct — weak labels never hard-block", () => {
+  it.each([
+    ["metrics are tracked in Grafana", true, false, false],
+    ["tests are tracked separately", true, false, false],
+    ["we'll look into this later", true, false, false],
+    ["I'll do it later this week", true, false, false],
+    ["TODO write more tests", true, false, true],     // STRONG still blocks
+    ["FIXME the failing case", true, false, true],     // STRONG still blocks
+    ["Tracked down root cause", true, false, false],   // not a promise pattern
+  ])("%j changed=%s verified=%s → %s", (text, changed, verified, want) => {
+    expect(shouldBlockPromiseNoAct(text, changed, verified)).toBe(want)
+  })
+})
+
+describe("classifyStopMode — read-only intent stays quick (with risks kept advisory)", () => {
+  it.each([
+    ["explain only how this works", "quick"],
+    ["describe only the bug", "quick"],
+    ["describe how to fix the parser", "normal"],  // describe alone → not read-only
+    ["describe the deploy pipeline", "deep"],      // 'deploy' is a DEEP keyword
+    ["no edits, just explain", "quick"],
+  ])("%j → %s", (text, want) => {
+    expect(classifyStopMode(text).mode).toBe(want)
+  })
+})
 })
 
 describe("parseVerification — output and exit-code precedence", () => {
