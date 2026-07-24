@@ -185,7 +185,7 @@ describe("EvidenceLedger.shouldBlockStop — mode-aware", () => {
     const l = new EvidenceLedger()
     l.reset("s1", "deep")
     l.recordChangedFiles("s1", "src/whatever.ts")
-    l.recordVerification("s1", "npm test", 0, true)
+    l.recordVerification("s1", "npm test", 0, "verified")
     expect(l.shouldBlockStop("s1")).toBe(false)
   })
 

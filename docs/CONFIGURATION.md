@@ -24,7 +24,6 @@ OpenCode’s host how it maps JSON plugin options into `PluginOptions` depends o
 interface Directive {
   readonly id: string
   readonly text: string
-  readonly at?: string  // ISO timestamp; set automatically on enqueue
 }
 ```
 

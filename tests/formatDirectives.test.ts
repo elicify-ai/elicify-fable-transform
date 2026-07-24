@@ -33,11 +33,4 @@ describe("formatDirectives", () => {
     const matches = out.match(/\[vertex:contract\]/g) ?? []
     expect(matches.length).toBe(1)
   })
-
-  it("timestamp on directive is no longer included in the envelope", () => {
-    const d: Directive = { id: "x", text: "y", at: "2026-01-02T03:04:05.000Z" }
-    const out = formatDirectives([d]) ?? ""
-    expect(out).not.toMatch(/\[x @ 2026-01-02T03:04:05\.000Z\]/)
-    expect(out).toMatch(/\[x\]\s*\n\s*y/)
-  })
 })

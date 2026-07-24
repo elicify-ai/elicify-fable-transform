@@ -37,7 +37,7 @@ describe("EvidenceLedger", () => {
     const l = new EvidenceLedger()
     l.reset("s1", "deep")
     l.recordChangedFiles("s1", "src/index.ts")
-    l.recordVerification("s1", "npm test", 0, true)
+    l.recordVerification("s1", "npm test", 0, "verified")
     expect(l.hasVerification("s1")).toBe(true)
     expect(l.shouldBlockStop("s1")).toBe(false)
   })
@@ -46,7 +46,7 @@ describe("EvidenceLedger", () => {
     const l = new EvidenceLedger()
     l.reset("s1", "deep")
     l.recordChangedFiles("s1", "src/index.ts")
-    l.recordVerification("s1", "npm test", 0, true)
+    l.recordVerification("s1", "npm test", 0, "verified")
     expect(l.shouldBlockStop("s1")).toBe(false)
     l.recordChangedFiles("s1", "src/index.ts")
     expect(l.hasVerification("s1")).toBe(false)
@@ -57,8 +57,20 @@ describe("EvidenceLedger", () => {
     const l = new EvidenceLedger()
     l.reset("s1", "deep")
     l.recordChangedFiles("s1", "src/index.ts")
-    l.recordVerification("s1", "npm test", 1, false)
+    l.recordVerification("s1", "npm test", 1, "failed")
     expect(l.shouldBlockStop("s1")).toBe(true)
+  })
+
+  it("rejects non-integer and unsafe verification exit codes", () => {
+    const l = new EvidenceLedger()
+    l.reset("s1")
+
+    for (const exitCode of [Number.NaN, Number.POSITIVE_INFINITY, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => l.recordVerification("s1", "npm test", exitCode, "verified")).toThrow(
+        "exitCode must be a safe integer",
+      )
+    }
+    expect(l.hasVerification("s1")).toBe(false)
   })
 
   it("detects a repeat failure after two matching signatures", () => {
@@ -97,9 +109,9 @@ describe("EvidenceLedger", () => {
     const l = new EvidenceLedger()
     l.reset("s1")
     l.recordChangedFiles("s1", "src/index.ts")
-    l.recordVerification("s1", "cmd1", 0, true)
-    l.recordVerification("s1", "cmd2", 0, true)
-    l.recordVerification("s1", "cmd3", 1, false)
+    l.recordVerification("s1", "cmd1", 0, "verified")
+    l.recordVerification("s1", "cmd2", 0, "verified")
+    l.recordVerification("s1", "cmd3", 1, "failed")
     expect(l.summary("s1")).toBe("files changed: yes · verified: 2 · failed: 1")
   })
 
@@ -108,7 +120,7 @@ describe("EvidenceLedger", () => {
     // the verified path; deep mode + docs-only are covered in stopMode.test.ts.
     const l = new EvidenceLedger()
     l.reset("s1")
-    l.recordVerification("s1", "true", 0, true)
+    l.recordVerification("s1", "true", 0, "verified")
     expect(l.shouldBlockStop("s1")).toBe(false)
   })
 })

@@ -39,8 +39,9 @@ import { redactSecrets } from "./redaction.js"
 export interface Directive {
   readonly id: string
   readonly text: string
-  readonly at?: string
 }
+
+export type FileKind = "docs" | "code" | "config" | "other"
 
 export interface ElicifyVertexOptions {
   readonly maxPerSession?: number
@@ -66,7 +67,7 @@ class DirectiveQueue {
   enqueue(sessionID: string, directive: Directive): void {
     if (!sessionID || !directive?.text) return
     const q = this.bySession.get(sessionID) ?? []
-    q.push({ ...directive, at: directive.at ?? new Date().toISOString() })
+    q.push({ ...directive })
     while (q.length > this.cap) q.shift()
     this.bySession.set(sessionID, q)
   }
@@ -110,8 +111,8 @@ class SessionGate {
 
 interface SessionLedger {
   changedFilesSeen: boolean
-  /** Distinct kinds of files changed (e.g. "docs", "code", "config") — path-kind classifier */
-  changedFileKinds: Set<string>
+  /** Distinct kinds of files changed — path-kind classifier. */
+  changedFileKinds: Set<FileKind>
   /** Set per-prompt to the classified mode (quick/normal/deep) — stop-mode classifier */
   taskMode: "quick" | "normal" | "deep"
   riskFlags: Set<RiskFlag>
@@ -152,10 +153,18 @@ export class EvidenceLedger {
     l.verificationResults = l.verificationResults.filter((v) => !v.success)
   }
 
-  recordVerification(sessionID: string, command: string, exitCode: number, success: boolean): void {
+  recordVerification(
+    sessionID: string,
+    command: string,
+    exitCode: number,
+    outcome: VerificationOutcome,
+  ): void {
+    if (!Number.isSafeInteger(exitCode)) {
+      throw new TypeError("exitCode must be a safe integer")
+    }
     const l = this.ledgers.get(sessionID)
     if (!l) return
-    l.verificationResults.push({ command, exitCode, success })
+    l.verificationResults.push({ command, exitCode, success: outcome === "verified" })
   }
 
   recordFailure(sessionID: string, signature: string): void {
@@ -275,7 +284,7 @@ const DOC_BASENAMES = new Set(["readme", "license", "changelog", "contributing",
 const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".pyi", ".go", ".rs", ".java", ".kt", ".scala", ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx", ".cs", ".rb", ".php", ".sh", ".bash", ".zsh"])
 const CONFIG_EXTENSIONS = new Set([".json", ".yaml", ".yml", ".toml", ".ini", ".env"])
 
-export function classifyFileKind(filePath: string): "docs" | "code" | "config" | "other" {
+export function classifyFileKind(filePath: string): FileKind {
   if (!filePath) return "other"
   const lower = filePath.toLowerCase()
   // Extract the basename (last path segment) to handle both "README.md" and
@@ -454,7 +463,7 @@ export function changedPathsFromTool(toolName: string, args: Record<string, unkn
 
 export type PromiseLocale = "en" | "ko"
 
-const PROMISE_NO_ACT_KEYWORDS: readonly { needle: string; label: string; locale: PromiseLocale }[] = [
+const PROMISE_NO_ACT_KEYWORDS = [
   { needle: "deferred", label: "explicit-deferral", locale: "en" },
   { needle: "file an issue", label: "issue-filing", locale: "en" },
   { needle: "i'll file", label: "issue-filing", locale: "en" },
@@ -474,11 +483,11 @@ const PROMISE_NO_ACT_KEYWORDS: readonly { needle: string; label: string; locale:
   { needle: "이슈를 등록", label: "issue-filing", locale: "ko" },
   { needle: "작업을 연기", label: "explicit-deferral", locale: "ko" },
   { needle: "추적하겠습니다", label: "tracked-instead-of-fixed", locale: "ko" },
-]
+] as const satisfies readonly { needle: string; label: string; locale: PromiseLocale }[]
 
 // Constrained patterns — not bare keywords — plus verb-followed future-intent form.
 // Avoids FPs on "tracked down", "later section", "see you later", "tracking ticket".
-const PROMISE_INTENT_PATTERNS: readonly { pattern: RegExp; label: string; locale: PromiseLocale }[] = [
+const PROMISE_INTENT_PATTERNS = [
   {
     pattern: /\b(I'?ll|I will|let me|next,?\s*I|now\s*I'?ll)\b[^.!?\n]{0,80}\b(now|next|then|implement|create|write|add|run|fix|save|build|start|proceed|address|handle|investigate|review)\b/i,
     label: "future-intent",
@@ -512,10 +521,14 @@ const PROMISE_INTENT_PATTERNS: readonly { pattern: RegExp; label: string; locale
     label: "future-intent",
     locale: "ko",
   },
-]
+] as const satisfies readonly { pattern: RegExp; label: string; locale: PromiseLocale }[]
+
+export type PromiseLabel =
+  | (typeof PROMISE_NO_ACT_KEYWORDS)[number]["label"]
+  | (typeof PROMISE_INTENT_PATTERNS)[number]["label"]
 
 /** Labels that still block after external verification (strong deferrals). */
-const STRONG_PROMISE_LABELS = new Set([
+const STRONG_PROMISE_LABELS: ReadonlySet<PromiseLabel> = new Set<PromiseLabel>([
   "todo-marker",
   "fixme-marker",
   "xxx-marker",
@@ -528,7 +541,7 @@ const STRONG_PROMISE_LABELS = new Set([
 ])
 
 export interface PromiseHit {
-  label: string
+  label: PromiseLabel
   locale: PromiseLocale
   matched: string
   start: number
@@ -873,15 +886,37 @@ const SUCCESS_PATTERN_RE = /\b(?:[1-9]\d*\s+passed|0 failed|0 errors|success|suc
 
 export type VerificationOutcome = "verified" | "failed" | "ambiguous" | "not-verification"
 
-export interface VerificationResult {
-  outcome: VerificationOutcome
-  isVerificationCommand: boolean
+interface VerificationResultDetails {
   matchedPattern: string | null
   failureDetected: boolean
   successDetected: boolean
   /** False when shell composition can hide the verifier's real exit code. */
   exitCodeReliable: boolean
 }
+
+/**
+ * Parsed verification evidence discriminated by `outcome`.
+ *
+ * Invariant: `outcome === "verified"` implies `exitCodeReliable === true`.
+ */
+export type VerificationResult =
+  | (VerificationResultDetails & {
+      outcome: "verified"
+      isVerificationCommand: true
+      exitCodeReliable: true
+    })
+  | (VerificationResultDetails & {
+      outcome: "failed"
+      isVerificationCommand: true
+    })
+  | (VerificationResultDetails & {
+      outcome: "ambiguous"
+      isVerificationCommand: true
+    })
+  | (VerificationResultDetails & {
+      outcome: "not-verification"
+      isVerificationCommand: false
+    })
 
 function stripCommandPrefix(segment: string): string {
   let value = segment.trim()
@@ -1456,7 +1491,7 @@ $ARGUMENTS`,
             // output. Silent verifiers such as tsc are valid evidence.
             const success = verification.outcome === "verified"
             if (exitCode !== undefined) {
-              ledger.recordVerification(sid, command, exitCode, success)
+              ledger.recordVerification(sid, command, exitCode, verification.outcome)
             }
             debug(`tool.after: bash "${command.slice(0, 60)}" → outcome=${verification.outcome}, verified=${success}, pattern=${verification.matchedPattern}`)
           }
